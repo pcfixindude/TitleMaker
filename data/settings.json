@@ -3,6 +3,11 @@
   "preset_name": "Bold Service Title",
   "loaded_preset_name": "Bold Service Title",
   "font_label": "BarlowCondensed-LightItalic.ttf",
+  "service_font": "BarlowCondensed-LightItalic.ttf",
+  "title_font": "BarlowCondensed-LightItalic.ttf",
+  "speaker_font": "BarlowCondensed-LightItalic.ttf",
+  "title_font_matches_service_font": true,
+  "speaker_font_matches_service_font": true,
   "text_color": "#FFFFFF",
   "background_label": "2022.jpeg",
   "service_box": {
@@ -13,7 +18,9 @@
     "alignment": "center",
     "auto_size": true,
     "font_size": 86,
-    "line_spacing": 1.0
+    "max_font_size": 260,
+    "line_spacing": 1.0,
+    "skew_angle": 0.0
   },
   "title_box": {
     "x": 280,
@@ -23,8 +30,8 @@
     "alignment": "center",
     "auto_size": false,
     "font_size": 260,
-    "line_spacing": 0.9,
     "max_font_size": 400,
+    "line_spacing": 0.9,
     "skew_angle": 0.0
   },
   "speaker_box": {
@@ -35,7 +42,9 @@
     "alignment": "center",
     "auto_size": true,
     "font_size": 80,
-    "line_spacing": 1.0
+    "max_font_size": 260,
+    "line_spacing": 1.0,
+    "skew_angle": 0.0
   },
   "show_service_line": true,
   "show_layout_guides": true,

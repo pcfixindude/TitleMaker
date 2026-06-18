@@ -210,6 +210,7 @@ def main() -> None:
         _ensure_valid_choice("service_font", font_labels)
         _ensure_valid_choice("title_font", font_labels)
         _ensure_valid_choice("speaker_font", font_labels)
+        _prepare_font_widget_defaults(font_labels)
 
         background_label = st.selectbox(
             "Background",
@@ -220,12 +221,12 @@ def main() -> None:
         service_font = st.selectbox(
             "Service Line Font",
             font_labels,
-            index=_choice_index(font_labels, st.session_state.service_font),
-            key="service_font",
+            index=_choice_index(font_labels, st.session_state.service_font_widget),
+            key="service_font_widget",
         )
         title_font_matches_service_font = st.checkbox(
             "Sermon Title font matches Service Line font",
-            key="title_font_matches_service_font",
+            key="title_font_matches_service_font_widget",
         )
         if title_font_matches_service_font:
             title_font = service_font
@@ -234,12 +235,12 @@ def main() -> None:
             title_font = st.selectbox(
                 "Sermon Title Font",
                 font_labels,
-                index=_choice_index(font_labels, st.session_state.title_font),
-                key="title_font",
+                index=_choice_index(font_labels, st.session_state.title_font_widget),
+                key="title_font_widget",
             )
         speaker_font_matches_service_font = st.checkbox(
             "Minister / Speaker font matches Service Line font",
-            key="speaker_font_matches_service_font",
+            key="speaker_font_matches_service_font_widget",
         )
         if speaker_font_matches_service_font:
             speaker_font = service_font
@@ -248,13 +249,16 @@ def main() -> None:
             speaker_font = st.selectbox(
                 "Minister / Speaker Font",
                 font_labels,
-                index=_choice_index(font_labels, st.session_state.speaker_font),
-                key="speaker_font",
+                index=_choice_index(font_labels, st.session_state.speaker_font_widget),
+                key="speaker_font_widget",
             )
-        # Keep the legacy single-font setting in sync for old settings/presets.
-        st.session_state.font_label = service_font
-        st.session_state.title_font = title_font
-        st.session_state.speaker_font = speaker_font
+        _sync_font_settings_from_widgets(
+            service_font,
+            title_font,
+            speaker_font,
+            title_font_matches_service_font,
+            speaker_font_matches_service_font,
+        )
         effective_font_settings = _current_font_settings()
         effective_service_font = get_effective_service_font(effective_font_settings)
         effective_title_font = get_effective_title_font(effective_font_settings)
@@ -567,6 +571,7 @@ def _restore_saved_session() -> None:
             "speaker_font_matches_service_font"
         ]
         st.session_state.font_label = font_settings["service_font"]
+        _set_pending_font_widget_defaults()
         for key in (
             "preset_name",
             "loaded_preset_name",
@@ -811,6 +816,50 @@ def _merge_box_defaults(box: dict, defaults: dict) -> dict:
     return merged
 
 
+def _prepare_font_widget_defaults(font_labels: list[str]) -> None:
+    pending = st.session_state.pop("pending_font_widget_defaults", None)
+    if isinstance(pending, dict):
+        for key, value in pending.items():
+            st.session_state[key] = value
+
+    defaults = {
+        "service_font_widget": st.session_state.service_font,
+        "title_font_widget": st.session_state.title_font,
+        "speaker_font_widget": st.session_state.speaker_font,
+        "title_font_matches_service_font_widget": st.session_state.title_font_matches_service_font,
+        "speaker_font_matches_service_font_widget": st.session_state.speaker_font_matches_service_font,
+    }
+    for key, value in defaults.items():
+        if key.endswith("_font_widget") and value not in font_labels:
+            value = font_labels[0]
+        st.session_state.setdefault(key, value)
+
+
+def _sync_font_settings_from_widgets(
+    service_font: str,
+    title_font: str,
+    speaker_font: str,
+    title_matches: bool,
+    speaker_matches: bool,
+) -> None:
+    st.session_state.font_label = service_font
+    st.session_state.service_font = service_font
+    st.session_state.title_font = title_font
+    st.session_state.speaker_font = speaker_font
+    st.session_state.title_font_matches_service_font = title_matches
+    st.session_state.speaker_font_matches_service_font = speaker_matches
+
+
+def _set_pending_font_widget_defaults() -> None:
+    st.session_state.pending_font_widget_defaults = {
+        "service_font_widget": st.session_state.service_font,
+        "title_font_widget": st.session_state.title_font,
+        "speaker_font_widget": st.session_state.speaker_font,
+        "title_font_matches_service_font_widget": st.session_state.title_font_matches_service_font,
+        "speaker_font_matches_service_font_widget": st.session_state.speaker_font_matches_service_font,
+    }
+
+
 def _select_first_entry() -> None:
     entries = st.session_state.get("schedule_entries", [])
     if entries:
@@ -1047,6 +1096,7 @@ def _apply_preset_to_session(
     st.session_state.speaker_font_matches_service_font = font_settings[
         "speaker_font_matches_service_font"
     ]
+    _set_pending_font_widget_defaults()
     st.session_state.background_label = (
         background_label if background_label in background_labels else background_labels[0]
     )
