@@ -13,6 +13,7 @@ from booth_mode import (
     mark_booth_exported,
     next_service_index,
     previous_service_index,
+    switch_service,
     update_booth_entry,
 )
 from export_settings import (
@@ -391,7 +392,7 @@ def main() -> None:
                 )
                 selected_entry = entries[_choice_index(labels, selected_label)]
                 if entry_key(selected_entry) != st.session_state.selected_entry_key:
-                    _load_entry(selected_entry)
+                    _switch_to_entry_index(_choice_index(labels, selected_label))
                     st.rerun()
 
             with top_right:
@@ -402,13 +403,14 @@ def main() -> None:
                 ):
                     current = find_current_service_entry(entries)
                     if current:
-                        _load_entry(current)
+                        _switch_to_entry_index(_entry_index_for_key(entry_key(current)))
                         st.success(f"Selected {current['service_line']}")
                         st.rerun()
                     else:
                         st.info("Today is not in the generated Monark schedule.")
 
             selected_entry = _selected_entry() or entries[0]
+            _prepare_booth_input_widgets(selected_entry)
             left, right = st.columns([0.95, 1.35], gap="large")
             with left:
                 st.subheader(selected_entry["service_line"])
@@ -420,16 +422,16 @@ def main() -> None:
                 sermon_title = st.text_area(
                     "Sermon title",
                     height=180,
-                    key="sermon_title",
+                    key="booth_sermon_title_widget",
                     placeholder="Type title here...",
                 )
                 speaker_name = st.text_input(
                     "Preacher / speaker",
-                    key="speaker_name",
+                    key="booth_speaker_widget",
                     placeholder="Type speaker here...",
                 )
                 with st.expander("Notes"):
-                    notes = st.text_area("Notes", height=80, key="service_notes")
+                    notes = st.text_area("Notes", height=80, key="booth_notes_widget")
 
                 st.session_state.schedule_entries = update_booth_entry(
                     st.session_state.schedule_entries,
@@ -449,7 +451,7 @@ def main() -> None:
                         if previous_index == current_index:
                             st.info("Already at the first service.")
                         else:
-                            _load_entry(entries[previous_index])
+                            _switch_to_entry_index(previous_index)
                             st.rerun()
                 with nav_right:
                     if st.button("Next Service", use_container_width=True):
@@ -459,7 +461,7 @@ def main() -> None:
                         if next_index == current_index:
                             st.info("Already at the last service.")
                         else:
-                            _load_entry(entries[next_index])
+                            _switch_to_entry_index(next_index)
                             st.rerun()
 
                 options = _options_from_entry(
@@ -606,9 +608,11 @@ def _ensure_defaults(today: date) -> None:
     st.session_state.setdefault("service_log_year", today.year)
     st.session_state.setdefault("pending_schedule_year", None)
     st.session_state.setdefault("selected_entry_key", "")
-    st.session_state.setdefault("sermon_title", "")
-    st.session_state.setdefault("speaker_name", "")
-    st.session_state.setdefault("service_notes", "")
+    st.session_state.setdefault("booth_sermon_title_widget", "")
+    st.session_state.setdefault("booth_speaker_widget", "")
+    st.session_state.setdefault("booth_notes_widget", "")
+    st.session_state.setdefault("booth_loaded_entry_id", "")
+    st.session_state.setdefault("pending_booth_values", None)
     st.session_state.setdefault("background_label", GENERATED_BACKGROUND_LABEL)
     st.session_state.setdefault("font_label", AUTOMATIC_FONT_LABEL)
     st.session_state.setdefault("service_font", st.session_state.font_label)
@@ -967,9 +971,8 @@ def _load_entry(entry: dict) -> None:
     values = load_entry_values(entry)
     st.session_state.selected_entry_key = values["selected_key"]
     st.session_state.selected_entry_label = _entry_label(entry)
-    st.session_state.sermon_title = values["title"]
-    st.session_state.speaker_name = values["speaker"]
-    st.session_state.service_notes = values["notes"]
+    st.session_state.pending_booth_values = values
+    st.session_state.booth_loaded_entry_id = ""
 
 
 def _update_selected_notes(notes: str) -> None:
@@ -983,11 +986,52 @@ def _persist_current_booth_inputs() -> None:
     st.session_state.schedule_entries = update_booth_entry(
         st.session_state.schedule_entries,
         st.session_state.selected_entry_key,
-        st.session_state.get("sermon_title", ""),
-        st.session_state.get("speaker_name", ""),
-        st.session_state.get("service_notes", ""),
+        st.session_state.get("booth_sermon_title_widget", ""),
+        st.session_state.get("booth_speaker_widget", ""),
+        st.session_state.get("booth_notes_widget", ""),
     )
     _save_service_log_now()
+
+
+def _prepare_booth_input_widgets(entry: dict) -> None:
+    pending = st.session_state.get("pending_booth_values")
+    entry_id = entry_key(entry)
+    if isinstance(pending, dict) and pending.get("selected_key") == entry_id:
+        values = pending
+        st.session_state.pending_booth_values = None
+    elif st.session_state.get("booth_loaded_entry_id") != entry_id:
+        values = load_entry_values(entry)
+    else:
+        return
+
+    st.session_state.booth_sermon_title_widget = values.get("title", "")
+    st.session_state.booth_speaker_widget = values.get("speaker", "")
+    st.session_state.booth_notes_widget = values.get("notes", "")
+    st.session_state.booth_loaded_entry_id = entry_id
+
+
+def _switch_to_entry_index(new_index: int) -> None:
+    entries = st.session_state.schedule_entries
+    result = switch_service(
+        entries,
+        _selected_entry_index(),
+        new_index,
+        st.session_state.get("booth_sermon_title_widget", ""),
+        st.session_state.get("booth_speaker_widget", ""),
+        st.session_state.get("booth_notes_widget", ""),
+    )
+    st.session_state.schedule_entries = result["entries"]
+    st.session_state.selected_entry_key = result["selected_key"]
+    st.session_state.pending_booth_values = result["values"]
+    st.session_state.booth_loaded_entry_id = ""
+    _save_service_log_now()
+
+
+def _entry_index_for_key(selected_key: str) -> int:
+    for index, entry in enumerate(st.session_state.schedule_entries):
+        if entry_key(entry) == selected_key:
+            return index
+    return _selected_entry_index()
 
 
 def _entry_label(entry: dict) -> str:

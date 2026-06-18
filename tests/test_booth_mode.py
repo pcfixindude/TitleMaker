@@ -12,6 +12,7 @@ from booth_mode import (
     mark_booth_exported,
     next_service_index,
     previous_service_index,
+    switch_service,
     update_selected_service_row,
     update_booth_entry,
 )
@@ -104,6 +105,56 @@ class BoothModeTest(unittest.TestCase):
     def test_next_service_does_not_go_past_last_index(self) -> None:
         self.assertEqual(next_service_index(2, 3), 2)
         self.assertEqual(next_service_index(0, 3), 1)
+
+    def test_switching_next_preserves_current_edits_and_loads_next_values(self) -> None:
+        entries = get_monark_service_entries(2026)
+        entries[1]["title"] = "Next Title"
+        entries[1]["speaker"] = "Next Speaker"
+        entries[1]["notes"] = "Next Notes"
+
+        result = switch_service(
+            entries,
+            current_index=0,
+            new_index=1,
+            title="Current Title",
+            speaker="Current Speaker",
+            notes="Current Notes",
+        )
+
+        self.assertEqual(entries[0]["title"], "Current Title")
+        self.assertEqual(entries[0]["speaker"], "Current Speaker")
+        self.assertEqual(entries[0]["notes"], "Current Notes")
+        self.assertEqual(result["index"], 1)
+        self.assertEqual(result["values"]["title"], "Next Title")
+        self.assertEqual(result["values"]["speaker"], "Next Speaker")
+        self.assertEqual(result["values"]["notes"], "Next Notes")
+
+    def test_switching_previous_preserves_current_edits(self) -> None:
+        entries = get_monark_service_entries(2026)
+
+        result = switch_service(
+            entries,
+            current_index=1,
+            new_index=0,
+            title="Edited AFT",
+            speaker="Speaker AFT",
+            notes="Notes AFT",
+        )
+
+        self.assertEqual(entries[1]["title"], "Edited AFT")
+        self.assertEqual(entries[1]["speaker"], "Speaker AFT")
+        self.assertEqual(result["index"], 0)
+
+    def test_jump_to_current_service_can_update_selected_index_safely(self) -> None:
+        entries = get_monark_service_entries(2026)
+        current = find_current_service_entry(entries, datetime(2026, 7, 31, 17, 0))
+        assert current is not None
+        current_index = entries.index(current)
+
+        result = switch_service(entries, 0, current_index, "Title", "Speaker", "Notes")
+
+        self.assertEqual(result["index"], 2)
+        self.assertEqual(result["selected_key"], entry_key(entries[2]))
 
     def test_export_marks_selected_row_exported(self) -> None:
         entries = get_monark_service_entries(2026)

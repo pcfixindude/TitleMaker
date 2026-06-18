@@ -50,6 +50,29 @@ def next_service_index(current_index: int, total_entries: int) -> int:
     return min(total_entries - 1, current_index + 1)
 
 
+def switch_service(
+    entries: list[dict[str, Any]],
+    current_index: int,
+    new_index: int,
+    title: str,
+    speaker: str,
+    notes: str = "",
+) -> dict[str, Any]:
+    if not entries:
+        return {"entries": entries, "index": 0, "selected_key": "", "values": {}}
+
+    bounded_current = max(0, min(current_index, len(entries) - 1))
+    bounded_new = max(0, min(new_index, len(entries) - 1))
+    update_booth_entry(entries, entry_key(entries[bounded_current]), title, speaker, notes)
+    selected = entries[bounded_new]
+    return {
+        "entries": entries,
+        "index": bounded_new,
+        "selected_key": entry_key(selected),
+        "values": load_entry_values(selected),
+    }
+
+
 def selected_entry_by_key(
     entries: list[dict[str, Any]],
     selected_key: str,
