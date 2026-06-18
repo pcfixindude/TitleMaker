@@ -15,6 +15,16 @@ from booth_mode import (
     previous_service_index,
     update_booth_entry,
 )
+from export_settings import (
+    EXPORT_LAYOUT_MODES,
+    EXPORT_TARGET_NAMES,
+    default_export_settings,
+    export_filename_for_target,
+    migrate_export_settings,
+    render_for_export,
+    resolve_export_target,
+    resolve_multi_targets,
+)
 from font_settings import (
     AUTOMATIC_FONT_LABEL,
     get_effective_service_font,
@@ -66,10 +76,8 @@ from title_renderer import (
     TitleImageOptions,
     default_font_path,
     ensure_project_dirs,
-    export_filename,
     list_custom_fonts,
     list_template_backgrounds,
-    render_title_image,
 )
 
 
@@ -273,6 +281,58 @@ def main() -> None:
         skew_enabled = st.checkbox("Skew title", key="skew_enabled")
         show_layout_guides = st.checkbox("Show layout guides", key="show_layout_guides")
 
+        st.divider()
+        st.header("Export Settings")
+        selected_export_target = st.selectbox(
+            "Export Target",
+            EXPORT_TARGET_NAMES,
+            index=_choice_index(EXPORT_TARGET_NAMES, st.session_state.selected_export_target),
+            key="selected_export_target",
+        )
+        allow_builtin_edit = st.checkbox(
+            "Allow editing built-in export size",
+            key="allow_builtin_export_size_edit",
+            disabled=selected_export_target == "Custom",
+        )
+        custom_or_editable = selected_export_target == "Custom" or allow_builtin_edit
+        st.number_input(
+            "Width",
+            min_value=1,
+            max_value=10000,
+            key="custom_export_width",
+            disabled=not custom_or_editable,
+        )
+        st.number_input(
+            "Height",
+            min_value=1,
+            max_value=10000,
+            key="custom_export_height",
+            disabled=not custom_or_editable,
+        )
+        st.text_input(
+            "Filename suffix",
+            key="custom_export_suffix",
+            disabled=selected_export_target != "Custom",
+        )
+        st.selectbox(
+            "Export layout mode",
+            EXPORT_LAYOUT_MODES,
+            index=_choice_index(EXPORT_LAYOUT_MODES, st.session_state.export_layout_mode),
+            key="export_layout_mode",
+        )
+        st.checkbox("Export multiple targets", key="export_multiple_targets")
+        if st.session_state.export_multiple_targets:
+            st.multiselect(
+                "Targets to export",
+                EXPORT_TARGET_NAMES,
+                default=st.session_state.multi_target_selection,
+                key="multi_target_selection",
+            )
+        current_export_target = resolve_export_target(_current_export_settings())
+        st.caption(
+            f"Export Target: {current_export_target.name} — {current_export_target.width}x{current_export_target.height}"
+        )
+
         st.subheader("Visual Layout Adjustments")
         _visual_layout_controls()
 
@@ -421,8 +481,14 @@ def main() -> None:
                     show_layout_guides,
                     st.session_state.selected_layout_area,
                 )
-                preview_image = render_title_image(options)
-                output_name = export_filename(options)
+                export_settings = _current_export_settings()
+                current_export_target = resolve_export_target(export_settings)
+                preview_image = render_for_export(
+                    options,
+                    current_export_target,
+                    st.session_state.export_layout_mode,
+                )
+                output_name = export_filename_for_target(options, current_export_target)
 
                 export_label = (
                     "Re-export Current Image"
@@ -443,6 +509,14 @@ def main() -> None:
                         _export_current(options)
                         st.session_state.confirm_blank_export = False
 
+                if st.session_state.export_multiple_targets:
+                    if st.button(
+                        "Export Current Image to Selected Targets",
+                        use_container_width=True,
+                    ):
+                        paths = _export_current_multi(options)
+                        st.success(f"Saved {len(paths)} files.")
+
                 if st.session_state.get("last_export_path"):
                     st.success(f"Saved to {st.session_state.last_export_path}")
 
@@ -457,6 +531,9 @@ def main() -> None:
             with right:
                 st.subheader("Preview")
                 st.image(preview_image, use_container_width=True)
+                st.caption(
+                    f"Export Target: {current_export_target.name} — {current_export_target.width}x{current_export_target.height}"
+                )
                 with st.expander("Status Panel", expanded=True):
                     st.write(f"Selected service line: {selected_entry['service_line']}")
                     st.write(
@@ -552,6 +629,8 @@ def _ensure_defaults(today: date) -> None:
     st.session_state.setdefault("size_step", 10)
     st.session_state.setdefault("font_step", 5)
     st.session_state.setdefault("skew_step", 2.0)
+    for key, value in default_export_settings().items():
+        st.session_state.setdefault(key, value)
 
 
 def _restore_saved_session() -> None:
@@ -560,6 +639,9 @@ def _restore_saved_session() -> None:
 
     settings = load_settings()
     if settings:
+        export_settings = migrate_export_settings(settings)
+        for key, value in export_settings.items():
+            st.session_state[key] = value
         font_settings = migrate_font_settings(settings)
         st.session_state.service_font = font_settings["service_font"]
         st.session_state.title_font = font_settings["title_font"]
@@ -665,6 +747,7 @@ def _save_settings_now() -> None:
             "selected_layout_area": st.session_state.selected_layout_area,
             "shadow_enabled": st.session_state.shadow_enabled,
             "skew_enabled": st.session_state.skew_enabled,
+            **_current_export_settings(),
         }
     )
 
@@ -988,8 +1071,11 @@ def _options_from_entry(
 
 
 def _export_current(options: TitleImageOptions) -> None:
-    output_path = EXPORTS_DIR / export_filename(options)
-    render_title_image(options).save(output_path, "PNG")
+    target = resolve_export_target(_current_export_settings())
+    output_path = EXPORTS_DIR / export_filename_for_target(options, target)
+    render_for_export(options, target, st.session_state.export_layout_mode).save(
+        output_path, "PNG"
+    )
     st.session_state.schedule_entries = mark_booth_exported(
         st.session_state.schedule_entries,
         st.session_state.selected_entry_key,
@@ -998,6 +1084,25 @@ def _export_current(options: TitleImageOptions) -> None:
     st.session_state.last_export_path = str(output_path)
     _save_service_log_now()
     st.success(f"Saved to {output_path}")
+
+
+def _export_current_multi(options: TitleImageOptions) -> list[Path]:
+    output_paths = []
+    for target in resolve_multi_targets(_current_export_settings()):
+        output_path = EXPORTS_DIR / export_filename_for_target(options, target)
+        render_for_export(options, target, st.session_state.export_layout_mode).save(
+            output_path, "PNG"
+        )
+        output_paths.append(output_path)
+    if output_paths:
+        st.session_state.schedule_entries = mark_booth_exported(
+            st.session_state.schedule_entries,
+            st.session_state.selected_entry_key,
+            datetime.now(),
+        )
+        st.session_state.last_export_path = ", ".join(str(path) for path in output_paths)
+        _save_service_log_now()
+    return output_paths
 
 
 def _export_batch(
@@ -1016,6 +1121,7 @@ def _export_batch(
     skew_enabled: bool,
 ) -> int:
     exported = 0
+    target = resolve_export_target(_current_export_settings())
     for entry in entries:
         options = _options_from_entry(
             entry,
@@ -1036,8 +1142,10 @@ def _export_batch(
             False,
             None,
         )
-        output_path = EXPORTS_DIR / export_filename(options)
-        render_title_image(options).save(output_path, "PNG")
+        output_path = EXPORTS_DIR / export_filename_for_target(options, target)
+        render_for_export(options, target, st.session_state.export_layout_mode).save(
+            output_path, "PNG"
+        )
         st.session_state.schedule_entries = mark_entry_exported(
             st.session_state.schedule_entries, entry_key(entry), datetime.now()
         )
@@ -1049,6 +1157,7 @@ def _current_preset_settings() -> dict:
     return {
         "font_choice": st.session_state.font_label,
         **_current_font_settings(),
+        **_current_export_settings(),
         "text_color": st.session_state.text_color,
         "background_choice": st.session_state.background_label,
         "service_line_box": st.session_state.service_box,
@@ -1070,6 +1179,7 @@ def _apply_preset_to_session(
 ) -> None:
     settings = settings_from_preset(preset)
     font_settings = migrate_font_settings(settings)
+    export_settings = migrate_export_settings(settings)
     font_label = font_settings["service_font"]
     background_label = settings["background_choice"]
     st.session_state.font_label = (
@@ -1109,6 +1219,8 @@ def _apply_preset_to_session(
     st.session_state.selected_layout_area = settings["selected_layout_area"]
     st.session_state.shadow_enabled = settings["shadow_enabled"]
     st.session_state.skew_enabled = settings["skew_enabled"]
+    for key, value in export_settings.items():
+        st.session_state[key] = value
 
 
 def _current_font_settings() -> dict:
@@ -1119,6 +1231,21 @@ def _current_font_settings() -> dict:
         "title_font_matches_service_font": st.session_state.title_font_matches_service_font,
         "speaker_font_matches_service_font": st.session_state.speaker_font_matches_service_font,
     }
+
+
+def _current_export_settings() -> dict:
+    return migrate_export_settings(
+        {
+            "selected_export_target": st.session_state.selected_export_target,
+            "custom_export_width": st.session_state.custom_export_width,
+            "custom_export_height": st.session_state.custom_export_height,
+            "custom_export_suffix": st.session_state.custom_export_suffix,
+            "allow_builtin_export_size_edit": st.session_state.allow_builtin_export_size_edit,
+            "export_layout_mode": st.session_state.export_layout_mode,
+            "export_multiple_targets": st.session_state.export_multiple_targets,
+            "multi_target_selection": st.session_state.multi_target_selection,
+        }
+    )
 
 
 def _text_box(box: dict) -> TextBox:

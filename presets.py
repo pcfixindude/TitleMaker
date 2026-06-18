@@ -9,6 +9,7 @@ from font_settings import (
     AUTOMATIC_FONT_LABEL,
     migrate_font_settings,
 )
+from export_settings import migrate_export_settings
 from title_renderer import (
     DEFAULT_BOTTOM_POSITION,
     DEFAULT_TITLE_POSITION,
@@ -83,6 +84,7 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "show_layout_guides": False,
         "selected_layout_area": "Sermon Title",
         "skew_enabled": True,
+        **migrate_export_settings({}),
     },
     {
         "name": "Plain Black Text",
@@ -108,6 +110,7 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "show_layout_guides": False,
         "selected_layout_area": "Sermon Title",
         "skew_enabled": False,
+        **migrate_export_settings({}),
     },
     {
         "name": "Bold Service Title",
@@ -133,6 +136,7 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "show_layout_guides": False,
         "selected_layout_area": "Sermon Title",
         "skew_enabled": True,
+        **migrate_export_settings({}),
     },
 ]
 
@@ -183,6 +187,7 @@ def normalize_preset(raw: dict[str, Any]) -> dict[str, Any]:
     if alignment not in ALIGNMENTS:
         alignment = "center"
     font_settings = migrate_font_settings(raw)
+    export_settings = migrate_export_settings(raw)
     service_line_box = _box(
         raw.get("service_line_box"),
         {**DEFAULT_SERVICE_BOX, "y": _position(raw.get("service_line_position"), DEFAULT_TOP_POSITION)[1]},
@@ -241,6 +246,7 @@ def normalize_preset(raw: dict[str, Any]) -> dict[str, Any]:
         if raw.get("selected_layout_area") in {"Service Line", "Sermon Title", "Speaker"}
         else "Sermon Title",
         "skew_enabled": bool(raw.get("skew_enabled", True)),
+        **export_settings,
     }
 
 

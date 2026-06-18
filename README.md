@@ -10,6 +10,7 @@ A simple local Streamlit app for creating 1920x1080 Monark Springs camp meeting 
 - Wraps and shrinks long sermon titles to fit
 - Selectable fonts from `fonts/`
 - Separate fonts for service line, sermon title, and minister/speaker text
+- Export targets for stream, YouTube, Facebook, square, vertical, Vimeo/Venmo, and custom sizes
 - Style presets saved as JSON in `presets/`
 - Monark service line format with show/hide toggle
 - Automatic Monark camp meeting schedule and live service log
@@ -236,6 +237,43 @@ Step-size controls let you nudge by small or large amounts for position, size, f
 Exact numeric editing is still available under `Advanced numeric layout values`, including X, Y, width, height, font size, auto-size, alignment, line spacing, title max font size, and italic slant angle.
 
 The sermon title can now auto-size up to `400` for short titles.
+
+## Export Targets
+
+Use `Export Settings` in the sidebar to choose where the image is going. The normal Monark livestream placeholder should use `Stream 1080p`.
+
+Built-in targets:
+
+- `Stream 1080p`: 1920x1080
+- `YouTube Thumbnail`: 1280x720
+- `YouTube 1080p`: 1920x1080
+- `Facebook Feed Landscape`: 1200x630
+- `Facebook / Instagram Square`: 1080x1080
+- `Facebook / Instagram Story or Reel`: 1080x1920
+- `Vimeo/Venmo 1080p`: 1920x1080
+- `Custom`: user-defined width, height, and suffix
+
+Exported filenames keep the safe date/day/service/title format and add the export target suffix:
+
+```text
+2026-07-24_FRIDAY_AM_IS_GOD_REAL_stream_1080p.png
+2026-07-24_FRIDAY_AM_IS_GOD_REAL_youtube_thumb.png
+2026-07-24_FRIDAY_AM_IS_GOD_REAL_facebook_landscape.png
+```
+
+For custom sizes, set the width, height, and suffix. Example:
+
+```text
+2026-07-24_FRIDAY_AM_IS_GOD_REAL_custom_1600x900.png
+```
+
+`Export layout mode` controls how the 1920x1080 design is adapted:
+
+- `Scale to fit`: preserve the 16:9 layout and fit it inside the target canvas
+- `Fill/crop`: fill the target canvas and crop as needed
+- `Stretch`: scale x and y independently to fill the target
+
+Enable `Export multiple targets` and choose several targets to export the current service image to multiple formats at once.
 
 ## Smoke Tests
 
