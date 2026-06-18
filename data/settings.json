@@ -50,5 +50,16 @@
   "show_layout_guides": false,
   "selected_layout_area": "Sermon Title",
   "shadow_enabled": false,
-  "skew_enabled": false
+  "skew_enabled": false,
+  "selected_export_target": "Stream 1080p",
+  "custom_export_width": 1920,
+  "custom_export_height": 1080,
+  "custom_export_suffix": "custom_1920x1080",
+  "allow_builtin_export_size_edit": false,
+  "export_layout_mode": "Scale to fit",
+  "export_multiple_targets": false,
+  "multi_target_selection": [
+    "Stream 1080p",
+    "YouTube Thumbnail"
+  ]
 }
