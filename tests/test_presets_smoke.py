@@ -70,6 +70,9 @@ class PresetsSmokeTest(unittest.TestCase):
 
         self.assertIn("skew_angle", loaded["title_box"])
         self.assertEqual(loaded["title_box"]["max_font_size"], 400)
+        self.assertEqual(loaded["service_font"], "Automatic fallback (Bebas Neue/system)")
+        self.assertTrue(loaded["title_font_matches_service_font"])
+        self.assertTrue(loaded["speaker_font_matches_service_font"])
 
     def test_new_preset_saves_and_loads_skew_angle(self) -> None:
         preset_path = save_preset(
@@ -97,6 +100,30 @@ class PresetsSmokeTest(unittest.TestCase):
             assert loaded is not None
             self.assertEqual(loaded["title_box"]["skew_angle"], 12.5)
             self.assertEqual(loaded["title_box"]["max_font_size"], 400)
+        finally:
+            preset_path.unlink(missing_ok=True)
+
+    def test_new_preset_saves_and_loads_separate_fonts(self) -> None:
+        preset_path = save_preset(
+            "Smoke Fonts Preset",
+            {
+                "service_font": "Service.ttf",
+                "title_font": "Title.ttf",
+                "speaker_font": "Speaker.ttf",
+                "title_font_matches_service_font": False,
+                "speaker_font_matches_service_font": False,
+            },
+        )
+
+        try:
+            loaded = load_preset(preset_path)
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(loaded["service_font"], "Service.ttf")
+            self.assertEqual(loaded["title_font"], "Title.ttf")
+            self.assertEqual(loaded["speaker_font"], "Speaker.ttf")
+            self.assertFalse(loaded["title_font_matches_service_font"])
+            self.assertFalse(loaded["speaker_font_matches_service_font"])
         finally:
             preset_path.unlink(missing_ok=True)
 

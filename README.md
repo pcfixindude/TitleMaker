@@ -9,6 +9,7 @@ A simple local Streamlit app for creating 1920x1080 Monark Springs camp meeting 
 - Uppercases the day, service, title, and speaker automatically
 - Wraps and shrinks long sermon titles to fit
 - Selectable fonts from `fonts/`
+- Separate fonts for service line, sermon title, and minister/speaker text
 - Style presets saved as JSON in `presets/`
 - Monark service line format with show/hide toggle
 - Automatic Monark camp meeting schedule and live service log
@@ -37,7 +38,7 @@ streamlit run app.py
 
 ## Fonts
 
-TitleMaker scans the `fonts/` folder for `.ttf` and `.otf` files and shows them in the Font dropdown.
+TitleMaker scans the `fonts/` folder for `.ttf` and `.otf` files and shows them in the font dropdowns.
 
 For the best match to the sample KEEP DRINKING style, use Barlow Condensed ExtraBold Italic. Place the font file in `fonts/`, for example:
 
@@ -54,6 +55,18 @@ fonts/BebasNeue-Regular.ttf
 ```
 
 If no custom font is present, TitleMaker will safely use the existing Bebas Neue/default fallback behavior and then an available system font.
+
+## Separate Fonts Per Text Area
+
+TitleMaker can use different fonts for each text area:
+
+- `Service Line Font` controls the date/service line.
+- `Sermon Title Font` controls the main title.
+- `Minister / Speaker Font` controls the bottom speaker line.
+
+By default, the sermon title and minister/speaker fonts match the Service Line font for backward compatibility. Uncheck `Sermon Title font matches Service Line font` or `Minister / Speaker font matches Service Line font` to choose a different font for that text area.
+
+This is useful for keeping the classic Monark service-line look while experimenting with stronger sermon title emphasis.
 
 ## Service Line Format
 

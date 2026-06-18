@@ -48,6 +48,9 @@ class TitleImageOptions:
     text_color: str = "#FFFFFF"
     background_path: Path | None = None
     font_path: Path | None = None
+    service_font_path: Path | None = None
+    title_font_path: Path | None = None
+    speaker_font_path: Path | None = None
     auto_size: bool = True
     title_font_size: int = 218
     top_line_position: tuple[int, int] = DEFAULT_TOP_POSITION
@@ -131,7 +134,7 @@ def render_title_image(options: TitleImageOptions) -> Image.Image:
         _draw_text_box(
             draw,
             top_line,
-            options.font_path,
+            options.service_font_path or options.font_path,
             text_color,
             service_box,
             options.shadow_enabled,
@@ -140,7 +143,7 @@ def render_title_image(options: TitleImageOptions) -> Image.Image:
         image,
         title,
         text_color,
-        options.font_path,
+        options.title_font_path or options.font_path,
         title_box,
         options.shadow_enabled,
         options.skew_enabled,
@@ -148,7 +151,7 @@ def render_title_image(options: TitleImageOptions) -> Image.Image:
     _draw_text_box(
         draw,
         speaker,
-        options.font_path,
+        options.speaker_font_path or options.font_path,
         text_color,
         speaker_box,
         options.shadow_enabled,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
+from pathlib import Path
 
 from title_renderer import (
     TextBox,
@@ -68,6 +69,37 @@ class TitleRendererTest(unittest.TestCase):
                 )
 
                 self.assertEqual(image.size, (1920, 1080))
+
+    def test_renderer_accepts_separate_font_paths(self) -> None:
+        image = render_title_image(
+            TitleImageOptions(
+                day="Friday",
+                service="Evening",
+                service_date=date(2026, 7, 31),
+                sermon_title="Keep Drinking",
+                speaker_name="Bro. Speaker",
+                service_font_path=None,
+                title_font_path=None,
+                speaker_font_path=None,
+            )
+        )
+
+        self.assertEqual(image.size, (1920, 1080))
+
+    def test_missing_custom_title_and_speaker_fonts_fall_back_safely(self) -> None:
+        image = render_title_image(
+            TitleImageOptions(
+                day="Friday",
+                service="Evening",
+                service_date=date(2026, 7, 31),
+                sermon_title="Keep Drinking",
+                speaker_name="Bro. Speaker",
+                title_font_path=Path("fonts/missing-title-font.ttf"),
+                speaker_font_path=Path("fonts/missing-speaker-font.ttf"),
+            )
+        )
+
+        self.assertEqual(image.size, (1920, 1080))
 
 
 if __name__ == "__main__":

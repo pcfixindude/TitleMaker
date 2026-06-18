@@ -5,6 +5,10 @@ import re
 from pathlib import Path
 from typing import Any
 
+from font_settings import (
+    AUTOMATIC_FONT_LABEL,
+    migrate_font_settings,
+)
 from title_renderer import (
     DEFAULT_BOTTOM_POSITION,
     DEFAULT_TITLE_POSITION,
@@ -15,7 +19,6 @@ from title_renderer import (
 from layout_controls import MAX_TITLE_FONT_SIZE, clamp_skew_angle
 
 
-AUTOMATIC_FONT_LABEL = "Automatic fallback (Bebas Neue/system)"
 GENERATED_BACKGROUND_LABEL = "Generated blue/gray background"
 ALIGNMENTS = ["center", "left", "right"]
 DEFAULT_SERVICE_BOX = {
@@ -59,6 +62,11 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
     {
         "name": "Monark Blue Gray",
         "font_choice": AUTOMATIC_FONT_LABEL,
+        "service_font": AUTOMATIC_FONT_LABEL,
+        "title_font": AUTOMATIC_FONT_LABEL,
+        "speaker_font": AUTOMATIC_FONT_LABEL,
+        "title_font_matches_service_font": True,
+        "speaker_font_matches_service_font": True,
         "auto_size": True,
         "title_font_size": 218,
         "text_color": "#FFFFFF",
@@ -79,6 +87,11 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
     {
         "name": "Plain Black Text",
         "font_choice": AUTOMATIC_FONT_LABEL,
+        "service_font": AUTOMATIC_FONT_LABEL,
+        "title_font": AUTOMATIC_FONT_LABEL,
+        "speaker_font": AUTOMATIC_FONT_LABEL,
+        "title_font_matches_service_font": True,
+        "speaker_font_matches_service_font": True,
         "auto_size": True,
         "title_font_size": 198,
         "text_color": "#111111",
@@ -99,6 +112,11 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
     {
         "name": "Bold Service Title",
         "font_choice": AUTOMATIC_FONT_LABEL,
+        "service_font": AUTOMATIC_FONT_LABEL,
+        "title_font": AUTOMATIC_FONT_LABEL,
+        "speaker_font": AUTOMATIC_FONT_LABEL,
+        "title_font_matches_service_font": True,
+        "speaker_font_matches_service_font": True,
         "auto_size": True,
         "title_font_size": 230,
         "text_color": "#FFFFFF",
@@ -164,6 +182,7 @@ def normalize_preset(raw: dict[str, Any]) -> dict[str, Any]:
     alignment = str(raw.get("text_alignment", "center")).lower()
     if alignment not in ALIGNMENTS:
         alignment = "center"
+    font_settings = migrate_font_settings(raw)
     service_line_box = _box(
         raw.get("service_line_box"),
         {**DEFAULT_SERVICE_BOX, "y": _position(raw.get("service_line_position"), DEFAULT_TOP_POSITION)[1]},
@@ -190,7 +209,16 @@ def normalize_preset(raw: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "name": name,
-        "font_choice": str(raw.get("font_choice") or AUTOMATIC_FONT_LABEL),
+        "font_choice": font_settings["service_font"],
+        "service_font": font_settings["service_font"],
+        "title_font": font_settings["title_font"],
+        "speaker_font": font_settings["speaker_font"],
+        "title_font_matches_service_font": font_settings[
+            "title_font_matches_service_font"
+        ],
+        "speaker_font_matches_service_font": font_settings[
+            "speaker_font_matches_service_font"
+        ],
         "auto_size": auto_size,
         "title_font_size": title_font_size,
         "text_color": str(raw.get("text_color") or "#FFFFFF"),

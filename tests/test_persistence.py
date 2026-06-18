@@ -50,6 +50,11 @@ class PersistenceTest(unittest.TestCase):
             settings = {
                 "selected_preset": "Monark Blue Gray",
                 "font_label": "Automatic fallback (Bebas Neue/system)",
+                "service_font": "Service.ttf",
+                "title_font": "Title.ttf",
+                "speaker_font": "Speaker.ttf",
+                "title_font_matches_service_font": False,
+                "speaker_font_matches_service_font": False,
                 "text_color": "#FFFFFF",
                 "background_label": "Generated blue/gray background",
                 "service_box": {"x": 10, "y": 20, "width": 300, "height": 40},
@@ -68,6 +73,8 @@ class PersistenceTest(unittest.TestCase):
             assert loaded is not None
             self.assertEqual(loaded["title_box"]["width"], 500)
             self.assertEqual(loaded["service_box"]["x"], 10)
+            self.assertEqual(loaded["service_font"], "Service.ttf")
+            self.assertEqual(loaded["title_font"], "Title.ttf")
 
     def test_exported_status_survives_reload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
