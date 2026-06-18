@@ -11,6 +11,8 @@ from booth_mode import (
     booth_service_labels,
     load_entry_values,
     mark_booth_exported,
+    next_service_index,
+    previous_service_index,
     update_booth_entry,
 )
 from monark_schedule import (
@@ -315,6 +317,28 @@ def main() -> None:
                     notes,
                 )
                 _save_service_log_now()
+
+                nav_left, nav_right = st.columns(2)
+                with nav_left:
+                    if st.button("Previous Service", use_container_width=True):
+                        _persist_current_booth_inputs()
+                        current_index = _selected_entry_index()
+                        previous_index = previous_service_index(current_index)
+                        if previous_index == current_index:
+                            st.info("Already at the first service.")
+                        else:
+                            _load_entry(entries[previous_index])
+                            st.rerun()
+                with nav_right:
+                    if st.button("Next Service", use_container_width=True):
+                        _persist_current_booth_inputs()
+                        current_index = _selected_entry_index()
+                        next_index = next_service_index(current_index, len(entries))
+                        if next_index == current_index:
+                            st.info("Already at the last service.")
+                        else:
+                            _load_entry(entries[next_index])
+                            st.rerun()
 
                 options = _options_from_entry(
                     selected_entry,
@@ -628,6 +652,17 @@ def _update_selected_notes(notes: str) -> None:
         if entry_key(entry) == st.session_state.selected_entry_key:
             entry["notes"] = notes
             break
+
+
+def _persist_current_booth_inputs() -> None:
+    st.session_state.schedule_entries = update_booth_entry(
+        st.session_state.schedule_entries,
+        st.session_state.selected_entry_key,
+        st.session_state.get("sermon_title", ""),
+        st.session_state.get("speaker_name", ""),
+        st.session_state.get("service_notes", ""),
+    )
+    _save_service_log_now()
 
 
 def _entry_label(entry: dict) -> str:

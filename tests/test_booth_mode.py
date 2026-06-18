@@ -5,9 +5,14 @@ from datetime import datetime
 
 from booth_mode import (
     NO_SCHEDULE_MESSAGE,
+    build_booth_service_label,
     booth_service_label,
+    get_selected_service_row,
     load_entry_values,
     mark_booth_exported,
+    next_service_index,
+    previous_service_index,
+    update_selected_service_row,
     update_booth_entry,
 )
 from monark_schedule import (
@@ -21,7 +26,7 @@ class BoothModeTest(unittest.TestCase):
     def test_service_option_labels_include_service_line_and_status(self) -> None:
         entries = get_monark_service_entries(2026)
 
-        self.assertEqual(booth_service_label(entries[0]), "FRIDAY AM 7-31-26 — blank")
+        self.assertEqual(build_booth_service_label(entries[0]), "FRIDAY AM 7-31-26 — blank")
 
         entries[1]["title"] = "IS GOD REAL?"
         entries[1]["speaker"] = "BRO. MARTY CLEVENGER"
@@ -32,6 +37,22 @@ class BoothModeTest(unittest.TestCase):
 
         entries[2]["exported"] = True
         self.assertEqual(booth_service_label(entries[2]), "FRIDAY PM 7-31-26 — exported")
+
+    def test_service_option_label_handles_title_only_and_speaker_only(self) -> None:
+        entries = get_monark_service_entries(2026)
+        entries[0]["title"] = "Title Only"
+        entries[1]["speaker"] = "Speaker Only"
+
+        self.assertEqual(booth_service_label(entries[0]), "FRIDAY AM 7-31-26 — Title Only")
+        self.assertEqual(
+            booth_service_label(entries[1]), "FRIDAY AFT 7-31-26 — Speaker Only"
+        )
+
+    def test_service_option_label_truncates_long_details(self) -> None:
+        entries = get_monark_service_entries(2026)
+        entries[0]["title"] = "A" * 100
+
+        self.assertTrue(booth_service_label(entries[0]).endswith("..."))
 
     def test_selecting_service_loads_correct_row(self) -> None:
         entries = get_monark_service_entries(2026)
@@ -44,6 +65,11 @@ class BoothModeTest(unittest.TestCase):
         self.assertEqual(values["title"], "Evening Title")
         self.assertEqual(values["speaker"], "Evening Speaker")
 
+    def test_selecting_service_by_index_returns_correct_row(self) -> None:
+        entries = get_monark_service_entries(2026)
+
+        self.assertEqual(get_selected_service_row(entries, 2), entries[2])
+
     def test_editing_title_updates_selected_row(self) -> None:
         entries = get_monark_service_entries(2026)
         selected_key = entry_key(entries[0])
@@ -51,6 +77,7 @@ class BoothModeTest(unittest.TestCase):
         update_booth_entry(entries, selected_key, "New Title", "", "")
 
         self.assertEqual(entries[0]["title"], "New Title")
+        self.assertEqual(entries[1]["title"], "")
 
     def test_editing_speaker_updates_selected_row(self) -> None:
         entries = get_monark_service_entries(2026)
@@ -59,6 +86,24 @@ class BoothModeTest(unittest.TestCase):
         update_booth_entry(entries, selected_key, "", "Bro. Speaker", "")
 
         self.assertEqual(entries[0]["speaker"], "Bro. Speaker")
+        self.assertEqual(entries[1]["speaker"], "")
+
+    def test_update_selected_service_row_alias_updates_selected_row(self) -> None:
+        entries = get_monark_service_entries(2026)
+        selected_key = entry_key(entries[0])
+
+        update_selected_service_row(entries, selected_key, "Alias Title", "Alias Speaker")
+
+        self.assertEqual(entries[0]["title"], "Alias Title")
+        self.assertEqual(entries[0]["speaker"], "Alias Speaker")
+
+    def test_previous_service_does_not_go_below_zero(self) -> None:
+        self.assertEqual(previous_service_index(0), 0)
+        self.assertEqual(previous_service_index(3), 2)
+
+    def test_next_service_does_not_go_past_last_index(self) -> None:
+        self.assertEqual(next_service_index(2, 3), 2)
+        self.assertEqual(next_service_index(0, 3), 1)
 
     def test_export_marks_selected_row_exported(self) -> None:
         entries = get_monark_service_entries(2026)
