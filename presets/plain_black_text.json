@@ -1,0 +1,23 @@
+{
+  "name": "Plain Black Text",
+  "font_choice": "Automatic fallback (Bebas Neue/system)",
+  "auto_size": true,
+  "title_font_size": 198,
+  "text_color": "#111111",
+  "background_choice": "Generated blue/gray background",
+  "title_position": [
+    960,
+    540
+  ],
+  "service_line_position": [
+    960,
+    112
+  ],
+  "speaker_line_position": [
+    960,
+    902
+  ],
+  "text_alignment": "center",
+  "shadow_enabled": false,
+  "show_service_line": true
+}

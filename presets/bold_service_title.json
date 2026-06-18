@@ -1,0 +1,23 @@
+{
+  "name": "Bold Service Title",
+  "font_choice": "Automatic fallback (Bebas Neue/system)",
+  "auto_size": true,
+  "title_font_size": 230,
+  "text_color": "#FFFFFF",
+  "background_choice": "Generated blue/gray background",
+  "title_position": [
+    960,
+    520
+  ],
+  "service_line_position": [
+    960,
+    92
+  ],
+  "speaker_line_position": [
+    960,
+    910
+  ],
+  "text_alignment": "center",
+  "shadow_enabled": true,
+  "show_service_line": true
+}

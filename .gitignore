@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Streamlit / local
+.streamlit/secrets.toml
+
+# Exports and generated files
+exports/
+data/service_log*.json
+data/last_session.json
+
+# OS files
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
