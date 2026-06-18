@@ -8,6 +8,7 @@ import streamlit as st
 
 from booth_mode import (
     NO_SCHEDULE_MESSAGE,
+    build_booth_service_label,
     booth_service_labels,
     load_entry_values,
     mark_booth_exported,
@@ -384,6 +385,7 @@ def main() -> None:
             top_left, top_right = st.columns([1.2, 0.8], gap="large")
             with top_left:
                 labels = booth_service_labels(entries)
+                _prepare_booth_selector_widget(labels)
                 selected_label = st.selectbox(
                     "Current service",
                     labels,
@@ -613,6 +615,7 @@ def _ensure_defaults(today: date) -> None:
     st.session_state.setdefault("booth_notes_widget", "")
     st.session_state.setdefault("booth_loaded_entry_id", "")
     st.session_state.setdefault("pending_booth_values", None)
+    st.session_state.setdefault("pending_booth_selected_label", None)
     st.session_state.setdefault("background_label", GENERATED_BACKGROUND_LABEL)
     st.session_state.setdefault("font_label", AUTOMATIC_FONT_LABEL)
     st.session_state.setdefault("service_font", st.session_state.font_label)
@@ -972,6 +975,7 @@ def _load_entry(entry: dict) -> None:
     st.session_state.selected_entry_key = values["selected_key"]
     st.session_state.selected_entry_label = _entry_label(entry)
     st.session_state.pending_booth_values = values
+    st.session_state.pending_booth_selected_label = build_booth_service_label(entry)
     st.session_state.booth_loaded_entry_id = ""
 
 
@@ -1010,6 +1014,19 @@ def _prepare_booth_input_widgets(entry: dict) -> None:
     st.session_state.booth_loaded_entry_id = entry_id
 
 
+def _prepare_booth_selector_widget(labels: list[str]) -> None:
+    pending = st.session_state.get("pending_booth_selected_label")
+    if pending in labels:
+        st.session_state.booth_selected_entry_label = pending
+        st.session_state.pending_booth_selected_label = None
+        return
+
+    if st.session_state.get("booth_selected_entry_label") not in labels:
+        index = _selected_entry_index()
+        if labels:
+            st.session_state.booth_selected_entry_label = labels[index]
+
+
 def _switch_to_entry_index(new_index: int) -> None:
     entries = st.session_state.schedule_entries
     result = switch_service(
@@ -1023,6 +1040,8 @@ def _switch_to_entry_index(new_index: int) -> None:
     st.session_state.schedule_entries = result["entries"]
     st.session_state.selected_entry_key = result["selected_key"]
     st.session_state.pending_booth_values = result["values"]
+    next_entry = st.session_state.schedule_entries[result["index"]]
+    st.session_state.pending_booth_selected_label = build_booth_service_label(next_entry)
     st.session_state.booth_loaded_entry_id = ""
     _save_service_log_now()
 

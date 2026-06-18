@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from monark_schedule import entry_key, row_id
 from title_renderer import PROJECT_ROOT, format_service_line, service_code
 
 
@@ -92,6 +93,7 @@ def _serialize_entry(entry: dict[str, Any]) -> dict[str, Any]:
         date_value = str(entry_date)
 
     return {
+        "row_id": entry_key(entry),
         "include": bool(entry.get("include")),
         "date": date_value,
         "weekday": entry.get("weekday", ""),
@@ -112,6 +114,7 @@ def _normalize_entry(row: dict[str, Any]) -> dict[str, Any]:
     weekday = row.get("weekday") or entry_date.strftime("%A")
     code = row.get("service_code") or service_code(service)
     return {
+        "row_id": row.get("row_id") or row_id(entry_date, code),
         "include": bool(row.get("include")),
         "date": entry_date,
         "weekday": weekday,

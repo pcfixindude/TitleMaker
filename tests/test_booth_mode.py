@@ -129,6 +129,57 @@ class BoothModeTest(unittest.TestCase):
         self.assertEqual(result["values"]["speaker"], "Next Speaker")
         self.assertEqual(result["values"]["notes"], "Next Notes")
 
+    def test_full_navigation_includes_blank_rows(self) -> None:
+        entries = get_monark_service_entries(2026)[:5]
+        entries[0]["title"] = "First Title"
+        entries[0]["speaker"] = "First Speaker"
+        entries[3]["title"] = "Fourth Title"
+        entries[3]["speaker"] = "Fourth Speaker"
+
+        result = switch_service(entries, 0, 1, "Saved First", "Saved Speaker", "")
+
+        self.assertEqual(result["index"], 1)
+        self.assertEqual(result["selected_key"], entry_key(entries[1]))
+        self.assertEqual(result["values"]["title"], "")
+        self.assertEqual(result["values"]["speaker"], "")
+
+    def test_next_into_blank_service_clears_loaded_inputs(self) -> None:
+        entries = get_monark_service_entries(2026)[:2]
+        entries[0]["title"] = "Current Title"
+        entries[0]["speaker"] = "Current Speaker"
+
+        result = switch_service(entries, 0, 1, "Current Title", "Current Speaker", "")
+
+        self.assertEqual(result["values"]["title"], "")
+        self.assertEqual(result["values"]["speaker"], "")
+        self.assertEqual(result["values"]["notes"], "")
+
+    def test_previous_into_blank_service_works(self) -> None:
+        entries = get_monark_service_entries(2026)[:2]
+        entries[1]["title"] = "Current AFT"
+        entries[1]["speaker"] = "Current Speaker"
+
+        result = switch_service(entries, 1, 0, "Current AFT", "Current Speaker", "")
+
+        self.assertEqual(result["index"], 0)
+        self.assertEqual(result["selected_key"], entry_key(entries[0]))
+        self.assertEqual(result["values"]["title"], "")
+
+    def test_dropdown_labels_include_blank_rows(self) -> None:
+        entries = get_monark_service_entries(2026)[:5]
+        labels = [booth_service_label(entry) for entry in entries]
+
+        self.assertEqual(len(labels), 5)
+        self.assertIn("FRIDAY AFT 7-31-26 — blank", labels)
+        self.assertIn("FRIDAY PM 7-31-26 — blank", labels)
+
+    def test_blank_rows_have_stable_unique_ids(self) -> None:
+        entries = get_monark_service_entries(2026)[:3]
+        keys = [entry_key(entry) for entry in entries]
+
+        self.assertEqual(keys, ["2026-07-31_AM", "2026-07-31_AFT", "2026-07-31_PM"])
+        self.assertEqual(len(set(keys)), 3)
+
     def test_switching_previous_preserves_current_edits(self) -> None:
         entries = get_monark_service_entries(2026)
 
@@ -155,6 +206,16 @@ class BoothModeTest(unittest.TestCase):
 
         self.assertEqual(result["index"], 2)
         self.assertEqual(result["selected_key"], entry_key(entries[2]))
+
+    def test_jump_to_current_service_finds_blank_row(self) -> None:
+        entries = get_monark_service_entries(2026)
+        current = find_current_service_entry(entries, datetime(2026, 7, 31, 13, 0))
+
+        self.assertIsNotNone(current)
+        assert current is not None
+        self.assertEqual(current["service_code"], "AFT")
+        self.assertEqual(current["title"], "")
+        self.assertEqual(current["speaker"], "")
 
     def test_export_marks_selected_row_exported(self) -> None:
         entries = get_monark_service_entries(2026)

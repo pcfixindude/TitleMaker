@@ -31,6 +31,7 @@ def get_monark_service_entries(year: int) -> list[dict]:
             code = service_code(service)
             entries.append(
                 {
+                    "row_id": row_id(service_date, code),
                     "include": False,
                     "date": service_date,
                     "weekday": weekday,
@@ -50,8 +51,14 @@ def get_monark_service_entries(year: int) -> list[dict]:
 
 
 def entry_key(entry: dict[str, Any]) -> str:
+    if entry.get("row_id"):
+        return str(entry["row_id"])
     entry_date = _coerce_date(entry["date"])
-    return f"{entry_date.isoformat()}|{entry['service_code']}"
+    return row_id(entry_date, entry["service_code"])
+
+
+def row_id(service_date: date, code: str) -> str:
+    return f"{service_date.isoformat()}_{code}"
 
 
 def update_entry_text(
@@ -107,6 +114,7 @@ def service_for_time(value: time) -> str:
 def entries_to_csv(entries: list[dict[str, Any]]) -> str:
     output = StringIO()
     fieldnames = [
+        "row_id",
         "include",
         "date",
         "weekday",
@@ -123,6 +131,7 @@ def entries_to_csv(entries: list[dict[str, Any]]) -> str:
     writer.writeheader()
     for entry in entries:
         row = {field: entry.get(field, "") for field in fieldnames}
+        row["row_id"] = entry_key(entry)
         row["date"] = _coerce_date(row["date"]).isoformat()
         writer.writerow(row)
     return output.getvalue()
@@ -136,6 +145,7 @@ def entries_from_csv(csv_text: str) -> list[dict[str, Any]]:
         service = row.get("service") or "Morning"
         weekday = row.get("weekday") or entry_date.strftime("%A")
         entry = {
+            "row_id": row.get("row_id") or row_id(entry_date, row.get("service_code") or service_code(service)),
             "include": _coerce_bool(row.get("include")),
             "date": entry_date,
             "weekday": weekday,
