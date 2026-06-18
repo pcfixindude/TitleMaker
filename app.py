@@ -15,6 +15,14 @@ from booth_mode import (
     previous_service_index,
     update_booth_entry,
 )
+from layout_controls import (
+    AREA_KEYS,
+    MAX_TITLE_FONT_SIZE,
+    clamp_box_to_canvas,
+    nudge_font_size,
+    nudge_skew_angle,
+    update_layout_box,
+)
 from monark_schedule import (
     batch_export_candidates,
     entries_from_csv,
@@ -214,7 +222,10 @@ def main() -> None:
         skew_enabled = st.checkbox("Skew title", key="skew_enabled")
         show_layout_guides = st.checkbox("Show layout guides", key="show_layout_guides")
 
-        with st.expander("Text Regions"):
+        st.subheader("Visual Layout Adjustments")
+        _visual_layout_controls()
+
+        with st.expander("Advanced numeric layout values"):
             _box_controls("Service line", "service_box")
             _box_controls("Main title", "title_box", allow_line_spacing=True)
             _box_controls("Speaker", "speaker_box")
@@ -355,6 +366,7 @@ def main() -> None:
                     shadow_enabled,
                     skew_enabled,
                     show_layout_guides,
+                    st.session_state.selected_layout_area,
                 )
                 preview_image = render_title_image(options)
                 output_name = export_filename(options)
@@ -475,6 +487,11 @@ def _ensure_defaults(today: date) -> None:
     st.session_state.setdefault("service_box", DEFAULT_SERVICE_BOX.copy())
     st.session_state.setdefault("title_box", DEFAULT_TITLE_BOX.copy())
     st.session_state.setdefault("speaker_box", DEFAULT_SPEAKER_BOX.copy())
+    st.session_state.setdefault("selected_layout_area", "Sermon Title")
+    st.session_state.setdefault("position_step", 5)
+    st.session_state.setdefault("size_step", 10)
+    st.session_state.setdefault("font_step", 5)
+    st.session_state.setdefault("skew_step", 2.0)
 
 
 def _restore_saved_session() -> None:
@@ -494,6 +511,7 @@ def _restore_saved_session() -> None:
             "speaker_box",
             "show_service_line",
             "show_layout_guides",
+            "selected_layout_area",
             "shadow_enabled",
             "skew_enabled",
         ):
@@ -568,6 +586,7 @@ def _save_settings_now() -> None:
             "speaker_box": st.session_state.speaker_box,
             "show_service_line": st.session_state.show_service_line,
             "show_layout_guides": st.session_state.show_layout_guides,
+            "selected_layout_area": st.session_state.selected_layout_area,
             "shadow_enabled": st.session_state.shadow_enabled,
             "skew_enabled": st.session_state.skew_enabled,
         }
@@ -593,13 +612,28 @@ def _box_controls(label: str, key: str, allow_line_spacing: bool = False) -> Non
         index=_choice_index(ALIGNMENTS, box["alignment"]),
     )
     box["auto_size"] = st.checkbox(f"{label} Auto-size", value=bool(box["auto_size"]))
+    max_font_size = MAX_TITLE_FONT_SIZE if key == "title_box" else 260
     box["font_size"] = st.slider(
         f"{label} Font size",
-        min_value=12,
-        max_value=260,
+        min_value=8,
+        max_value=max_font_size,
         value=int(box["font_size"]),
         disabled=box["auto_size"],
     )
+    if key == "title_box":
+        box["max_font_size"] = st.slider(
+            f"{label} Max font size",
+            min_value=8,
+            max_value=MAX_TITLE_FONT_SIZE,
+            value=int(box.get("max_font_size", MAX_TITLE_FONT_SIZE)),
+        )
+        box["skew_angle"] = st.slider(
+            "Italic slant angle",
+            min_value=-25.0,
+            max_value=25.0,
+            value=float(box.get("skew_angle", 0.0)),
+            step=0.5,
+        )
     if allow_line_spacing:
         box["line_spacing"] = st.slider(
             f"{label} Line spacing",
@@ -608,7 +642,95 @@ def _box_controls(label: str, key: str, allow_line_spacing: bool = False) -> Non
             value=float(box["line_spacing"]),
             step=0.05,
         )
-    st.session_state[key] = box
+    st.session_state[key] = clamp_box_to_canvas(box)
+
+
+def _visual_layout_controls() -> None:
+    selected_area = st.selectbox(
+        "Text area to adjust",
+        list(AREA_KEYS.keys()),
+        index=_choice_index(list(AREA_KEYS.keys()), st.session_state.selected_layout_area),
+        key="selected_layout_area",
+    )
+    steps = st.columns(4)
+    position_step = steps[0].select_slider(
+        "Position step",
+        options=[1, 5, 10, 25, 50],
+        value=st.session_state.position_step,
+        key="position_step",
+    )
+    size_step = steps[1].select_slider(
+        "Size step",
+        options=[1, 5, 10, 25, 50],
+        value=st.session_state.size_step,
+        key="size_step",
+    )
+    font_step = steps[2].select_slider(
+        "Font step",
+        options=[1, 2, 5, 10, 25],
+        value=st.session_state.font_step,
+        key="font_step",
+    )
+    skew_step = steps[3].select_slider(
+        "Skew step",
+        options=[0.5, 1.0, 2.0, 5.0],
+        value=st.session_state.skew_step,
+        key="skew_step",
+    )
+
+    st.caption("Position")
+    row = st.columns([1, 1, 1])
+    row[1].button("Up", on_click=_nudge_box, args=(selected_area, 0, -position_step, 0, 0), use_container_width=True)
+    row = st.columns([1, 1, 1])
+    row[0].button("Left", on_click=_nudge_box, args=(selected_area, -position_step, 0, 0, 0), use_container_width=True)
+    row[1].markdown("<div style='text-align:center'>Move</div>", unsafe_allow_html=True)
+    row[2].button("Right", on_click=_nudge_box, args=(selected_area, position_step, 0, 0, 0), use_container_width=True)
+    row = st.columns([1, 1, 1])
+    row[1].button("Down", on_click=_nudge_box, args=(selected_area, 0, position_step, 0, 0), use_container_width=True)
+
+    st.caption("Size")
+    row = st.columns(4)
+    row[0].button("Wider", on_click=_nudge_box, args=(selected_area, 0, 0, size_step, 0), use_container_width=True)
+    row[1].button("Narrower", on_click=_nudge_box, args=(selected_area, 0, 0, -size_step, 0), use_container_width=True)
+    row[2].button("Taller", on_click=_nudge_box, args=(selected_area, 0, 0, 0, size_step), use_container_width=True)
+    row[3].button("Shorter", on_click=_nudge_box, args=(selected_area, 0, 0, 0, -size_step), use_container_width=True)
+
+    st.caption("Font")
+    row = st.columns(2 if selected_area != "Sermon Title" else 4)
+    row[0].button("A+", on_click=_nudge_font, args=(selected_area, font_step), use_container_width=True)
+    row[1].button("A-", on_click=_nudge_font, args=(selected_area, -font_step), use_container_width=True)
+    if selected_area == "Sermon Title":
+        row[2].button("Italic +", on_click=_nudge_skew, args=(selected_area, skew_step), use_container_width=True)
+        row[3].button("Italic -", on_click=_nudge_skew, args=(selected_area, -skew_step), use_container_width=True)
+
+
+def _layout_settings() -> dict:
+    return {
+        "service_box": st.session_state.service_box,
+        "title_box": st.session_state.title_box,
+        "speaker_box": st.session_state.speaker_box,
+    }
+
+
+def _apply_layout_settings(settings: dict) -> None:
+    st.session_state.service_box = settings["service_box"]
+    st.session_state.title_box = settings["title_box"]
+    st.session_state.speaker_box = settings["speaker_box"]
+
+
+def _nudge_box(area_name: str, dx: int, dy: int, dw: int, dh: int) -> None:
+    settings = update_layout_box(_layout_settings(), area_name, dx=dx, dy=dy, dw=dw, dh=dh)
+    _apply_layout_settings(settings)
+
+
+def _nudge_font(area_name: str, delta: int) -> None:
+    settings = nudge_font_size(_layout_settings(), area_name, delta)
+    _apply_layout_settings(settings)
+
+
+def _nudge_skew(area_name: str, delta: float) -> None:
+    settings = nudge_skew_angle(_layout_settings(), area_name, delta)
+    _apply_layout_settings(settings)
 
 
 def _merge_box_defaults(box: dict, defaults: dict) -> dict:
@@ -719,6 +841,7 @@ def _options_from_entry(
     shadow_enabled: bool,
     skew_enabled: bool,
     show_layout_guides: bool,
+    selected_layout_area: str | None = None,
 ) -> TitleImageOptions:
     return TitleImageOptions(
         day=entry["weekday"],
@@ -736,6 +859,7 @@ def _options_from_entry(
         show_service_line=show_service_line,
         skew_enabled=skew_enabled,
         show_layout_guides=show_layout_guides,
+        selected_layout_area=selected_layout_area,
     )
 
 
@@ -782,6 +906,7 @@ def _export_batch(
             shadow_enabled,
             skew_enabled,
             False,
+            None,
         )
         output_path = EXPORTS_DIR / export_filename(options)
         render_title_image(options).save(output_path, "PNG")
@@ -802,6 +927,7 @@ def _current_preset_settings() -> dict:
         "speaker_box": st.session_state.speaker_box,
         "show_service_line": st.session_state.show_service_line,
         "show_layout_guides": st.session_state.show_layout_guides,
+        "selected_layout_area": st.session_state.selected_layout_area,
         "shadow_enabled": st.session_state.shadow_enabled,
         "skew_enabled": st.session_state.skew_enabled,
     }
@@ -832,6 +958,7 @@ def _apply_preset_to_session(
     st.session_state.speaker_box = settings["speaker_box"].copy()
     st.session_state.show_service_line = settings["show_service_line"]
     st.session_state.show_layout_guides = settings["show_layout_guides"]
+    st.session_state.selected_layout_area = settings["selected_layout_area"]
     st.session_state.shadow_enabled = settings["shadow_enabled"]
     st.session_state.skew_enabled = settings["skew_enabled"]
 
@@ -845,7 +972,9 @@ def _text_box(box: dict) -> TextBox:
         alignment=box["alignment"],
         auto_size=bool(box["auto_size"]),
         font_size=int(box["font_size"]),
+        max_font_size=int(box.get("max_font_size", MAX_TITLE_FONT_SIZE)),
         line_spacing=float(box["line_spacing"]),
+        skew_angle=float(box.get("skew_angle", 0.0)),
     )
 
 

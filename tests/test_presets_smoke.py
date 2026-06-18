@@ -50,6 +50,56 @@ class PresetsSmokeTest(unittest.TestCase):
         finally:
             preset_path.unlink(missing_ok=True)
 
+    def test_old_preset_without_skew_angle_loads_safely(self) -> None:
+        loaded = settings_from_preset(
+            {
+                "name": "Old Preset",
+                "font_choice": "Automatic fallback (Bebas Neue/system)",
+                "title_box": {
+                    "x": 280,
+                    "y": 325,
+                    "width": 1360,
+                    "height": 430,
+                    "font_size": 218,
+                    "auto_size": True,
+                    "alignment": "center",
+                    "line_spacing": 0.9,
+                },
+            }
+        )
+
+        self.assertIn("skew_angle", loaded["title_box"])
+        self.assertEqual(loaded["title_box"]["max_font_size"], 400)
+
+    def test_new_preset_saves_and_loads_skew_angle(self) -> None:
+        preset_path = save_preset(
+            "Smoke Skew Preset",
+            {
+                "font_choice": "Automatic fallback (Bebas Neue/system)",
+                "title_box": {
+                    "x": 280,
+                    "y": 325,
+                    "width": 1360,
+                    "height": 430,
+                    "font_size": 300,
+                    "max_font_size": 400,
+                    "auto_size": True,
+                    "alignment": "center",
+                    "line_spacing": 0.9,
+                    "skew_angle": 12.5,
+                },
+            },
+        )
+
+        try:
+            loaded = load_preset(preset_path)
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(loaded["title_box"]["skew_angle"], 12.5)
+            self.assertEqual(loaded["title_box"]["max_font_size"], 400)
+        finally:
+            preset_path.unlink(missing_ok=True)
+
     def test_loaded_preset_can_render_title_image(self) -> None:
         preset_path = PRESETS_DIR / "bold_service_title.json"
         preset = load_preset(preset_path)

@@ -1,0 +1,45 @@
+{
+  "selected_preset": "Bold Service Title",
+  "preset_name": "Bold Service Title",
+  "loaded_preset_name": "Bold Service Title",
+  "font_label": "BarlowCondensed-LightItalic.ttf",
+  "text_color": "#FFFFFF",
+  "background_label": "2022.jpeg",
+  "service_box": {
+    "x": 280,
+    "y": 92,
+    "width": 1360,
+    "height": 110,
+    "alignment": "center",
+    "auto_size": true,
+    "font_size": 86,
+    "line_spacing": 1.0
+  },
+  "title_box": {
+    "x": 280,
+    "y": 200,
+    "width": 1360,
+    "height": 430,
+    "alignment": "center",
+    "auto_size": false,
+    "font_size": 260,
+    "line_spacing": 0.9,
+    "max_font_size": 400,
+    "skew_angle": 0.0
+  },
+  "speaker_box": {
+    "x": 280,
+    "y": 650,
+    "width": 1360,
+    "height": 110,
+    "alignment": "center",
+    "auto_size": true,
+    "font_size": 80,
+    "line_spacing": 1.0
+  },
+  "show_service_line": true,
+  "show_layout_guides": true,
+  "selected_layout_area": "Service Line",
+  "shadow_enabled": false,
+  "skew_enabled": false
+}

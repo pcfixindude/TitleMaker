@@ -12,6 +12,7 @@ from title_renderer import (
     PRESETS_DIR,
     ensure_project_dirs,
 )
+from layout_controls import MAX_TITLE_FONT_SIZE, clamp_skew_angle
 
 
 AUTOMATIC_FONT_LABEL = "Automatic fallback (Bebas Neue/system)"
@@ -25,7 +26,9 @@ DEFAULT_SERVICE_BOX = {
     "alignment": "center",
     "auto_size": True,
     "font_size": 86,
+    "max_font_size": 260,
     "line_spacing": 1.0,
+    "skew_angle": 0.0,
 }
 DEFAULT_TITLE_BOX = {
     "x": 280,
@@ -35,7 +38,9 @@ DEFAULT_TITLE_BOX = {
     "alignment": "center",
     "auto_size": True,
     "font_size": 218,
+    "max_font_size": MAX_TITLE_FONT_SIZE,
     "line_spacing": 0.9,
+    "skew_angle": -7.0,
 }
 DEFAULT_SPEAKER_BOX = {
     "x": 280,
@@ -45,7 +50,9 @@ DEFAULT_SPEAKER_BOX = {
     "alignment": "center",
     "auto_size": True,
     "font_size": 80,
+    "max_font_size": 260,
     "line_spacing": 1.0,
+    "skew_angle": 0.0,
 }
 
 BUILT_IN_PRESETS: list[dict[str, Any]] = [
@@ -66,6 +73,7 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "shadow_enabled": True,
         "show_service_line": True,
         "show_layout_guides": False,
+        "selected_layout_area": "Sermon Title",
         "skew_enabled": True,
     },
     {
@@ -85,6 +93,7 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "shadow_enabled": False,
         "show_service_line": True,
         "show_layout_guides": False,
+        "selected_layout_area": "Sermon Title",
         "skew_enabled": False,
     },
     {
@@ -104,6 +113,7 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "shadow_enabled": True,
         "show_service_line": True,
         "show_layout_guides": False,
+        "selected_layout_area": "Sermon Title",
         "skew_enabled": True,
     },
 ]
@@ -150,7 +160,7 @@ def save_preset(name: str, settings: dict[str, Any]) -> Path:
 def normalize_preset(raw: dict[str, Any]) -> dict[str, Any]:
     name = str(raw.get("name") or "Untitled Preset").strip() or "Untitled Preset"
     auto_size = bool(raw.get("auto_size", True))
-    title_font_size = _int_in_range(raw.get("title_font_size", 218), 48, 260)
+    title_font_size = _int_in_range(raw.get("title_font_size", 218), 48, MAX_TITLE_FONT_SIZE)
     alignment = str(raw.get("text_alignment", "center")).lower()
     if alignment not in ALIGNMENTS:
         alignment = "center"
@@ -199,6 +209,9 @@ def normalize_preset(raw: dict[str, Any]) -> dict[str, Any]:
         "shadow_enabled": bool(raw.get("shadow_enabled", True)),
         "show_service_line": bool(raw.get("show_service_line", True)),
         "show_layout_guides": bool(raw.get("show_layout_guides", False)),
+        "selected_layout_area": raw.get("selected_layout_area")
+        if raw.get("selected_layout_area") in {"Service Line", "Sermon Title", "Speaker"}
+        else "Sermon Title",
         "skew_enabled": bool(raw.get("skew_enabled", True)),
     }
 
@@ -229,8 +242,14 @@ def _box(value: Any, fallback: dict[str, Any], alignment: str) -> dict[str, Any]
         else alignment,
         "auto_size": bool(raw.get("auto_size", fallback.get("auto_size", True))),
         "font_size": _int_in_range(raw.get("font_size", fallback["font_size"]), 12, 260),
+        "max_font_size": _int_in_range(
+            raw.get("max_font_size", fallback.get("max_font_size", 260)), 12, MAX_TITLE_FONT_SIZE
+        ),
         "line_spacing": _float_in_range(
             raw.get("line_spacing", fallback.get("line_spacing", 1.0)), 0.5, 2.0
+        ),
+        "skew_angle": clamp_skew_angle(
+            raw.get("skew_angle", fallback.get("skew_angle", 0.0))
         ),
     }
 

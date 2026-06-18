@@ -13,6 +13,7 @@ A simple local Streamlit app for creating 1920x1080 Monark Springs camp meeting 
 - Monark service line format with show/hide toggle
 - Automatic Monark camp meeting schedule and live service log
 - Booth Mode for large live-service controls
+- Visual layout adjustment buttons for text regions
 - Automatic local persistence for service logs and active settings
 - Uses Barlow Condensed ExtraBold Italic as the preferred default when available
 - Uses `fonts/BebasNeue-Regular.ttf` as a fallback when available
@@ -205,6 +206,23 @@ Presets are JSON files stored in `presets/`. A preset can include the font choic
 To save your own style, adjust the sidebar style settings, enter a name in `Save current settings as preset`, and click `Save Preset`.
 
 Custom presets appear in the dropdown after they are saved.
+
+## Visual Layout Adjustment
+
+Use `Visual Layout Adjustments` in the sidebar while watching the preview.
+
+1. Select `Service Line`, `Sermon Title`, or `Speaker`.
+2. Use the arrow buttons to move the selected text box.
+3. Use `Wider`, `Narrower`, `Taller`, and `Shorter` to resize the region.
+4. Use `A+` and `A-` to adjust font size.
+5. For the sermon title, use `Italic +` and `Italic -` or the numeric `Italic slant angle` control to customize the slant.
+6. Turn on `Show layout guides` while adjusting. The selected region is highlighted more strongly.
+
+Step-size controls let you nudge by small or large amounts for position, size, font size, and skew angle.
+
+Exact numeric editing is still available under `Advanced numeric layout values`, including X, Y, width, height, font size, auto-size, alignment, line spacing, title max font size, and italic slant angle.
+
+The sermon title can now auto-size up to `400` for short titles.
 
 ## Smoke Tests
 

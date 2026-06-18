@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import re
+from math import radians, tan
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+from layout_controls import MAX_TITLE_FONT_SIZE
 
 
 CANVAS_SIZE = (1920, 1080)
@@ -30,7 +33,9 @@ class TextBox:
     alignment: str = "center"
     auto_size: bool = True
     font_size: int = 86
+    max_font_size: int = MAX_TITLE_FONT_SIZE
     line_spacing: float = 1.0
+    skew_angle: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -56,6 +61,7 @@ class TitleImageOptions:
     speaker_box: TextBox | None = None
     skew_enabled: bool = True
     show_layout_guides: bool = False
+    selected_layout_area: str | None = None
 
 
 def ensure_project_dirs() -> None:
@@ -149,7 +155,13 @@ def render_title_image(options: TitleImageOptions) -> Image.Image:
     )
 
     if options.show_layout_guides:
-        _draw_layout_guides(draw, service_box, title_box, speaker_box)
+        _draw_layout_guides(
+            draw,
+            service_box,
+            title_box,
+            speaker_box,
+            options.selected_layout_area,
+        )
 
     return image
 
@@ -333,7 +345,7 @@ def _draw_main_title(
         max_height=box.height,
         font_path=font_path,
         auto_size=box.auto_size,
-        title_font_size=box.font_size,
+        title_font_size=box.max_font_size if box.auto_size else box.font_size,
         line_spacing=box.line_spacing,
     )
 
@@ -360,13 +372,18 @@ def _draw_main_title(
         image.paste(title_layer, (paste_x, paste_y), title_layer)
         return
 
-    # A light x-axis shear gives the title a fast slanted poster look.
-    skew = -0.12
+    skew = tan(radians(box.skew_angle))
+    if abs(skew) < 0.0001:
+        paste_x = box.x - 130
+        paste_y = box.y - 65
+        image.paste(title_layer, (paste_x, paste_y), title_layer)
+        return
+
     x_shift = int(abs(skew) * layer_height)
     skewed = title_layer.transform(
         (layer_width + x_shift, layer_height),
         Image.Transform.AFFINE,
-        (1, skew, x_shift if skew < 0 else 0, 0, 1, 0),
+        (1, -skew, x_shift if skew > 0 else 0, 0, 1, 0),
         resample=Image.Resampling.BICUBIC,
     )
 
@@ -385,7 +402,7 @@ def _fit_title(
     line_spacing: float,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
     probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
-    start_size = max(48, min(title_font_size, 260))
+    start_size = max(48, min(title_font_size, MAX_TITLE_FONT_SIZE))
 
     for size in range(start_size, 87, -4):
         font = _load_font(size, font_path)
@@ -448,6 +465,25 @@ def _wrap_title(
             lines.append(current)
 
     return lines
+
+
+def fit_title_metrics_for_test(
+    title: str,
+    max_width: int = 1360,
+    max_height: int = 430,
+    font_size: int = MAX_TITLE_FONT_SIZE,
+    auto_size: bool = True,
+    line_spacing: float = 0.9,
+) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
+    return _fit_title(
+        format_title(title),
+        max_width=max_width,
+        max_height=max_height,
+        font_path=None,
+        auto_size=auto_size,
+        title_font_size=font_size,
+        line_spacing=line_spacing,
+    )
 
 
 def fit_title_lines_for_test(
@@ -542,6 +578,7 @@ def _service_box(options: TitleImageOptions) -> TextBox:
         alignment=options.text_alignment,
         auto_size=True,
         font_size=86,
+        max_font_size=260,
         line_spacing=1.0,
     )
 
@@ -557,7 +594,9 @@ def _title_box(options: TitleImageOptions) -> TextBox:
         alignment=options.text_alignment,
         auto_size=options.auto_size,
         font_size=options.title_font_size,
+        max_font_size=MAX_TITLE_FONT_SIZE,
         line_spacing=0,
+        skew_angle=-7.0,
     )
 
 
@@ -572,6 +611,7 @@ def _speaker_box(options: TitleImageOptions) -> TextBox:
         alignment=options.text_alignment,
         auto_size=True,
         font_size=80,
+        max_font_size=260,
         line_spacing=1.0,
     )
 
@@ -581,11 +621,19 @@ def _draw_layout_guides(
     service_box: TextBox,
     title_box: TextBox,
     speaker_box: TextBox,
+    selected_layout_area: str | None,
 ) -> None:
     guide_color = (255, 255, 255, 115)
-    for box in (service_box, title_box, speaker_box):
+    boxes = {
+        "Service Line": service_box,
+        "Sermon Title": title_box,
+        "Speaker": speaker_box,
+    }
+    for area_name, box in boxes.items():
+        width = 6 if area_name == selected_layout_area else 3
+        color = (255, 230, 80, 180) if area_name == selected_layout_area else guide_color
         draw.rectangle(
             (box.x, box.y, box.x + box.width, box.y + box.height),
-            outline=guide_color,
-            width=3,
+            outline=color,
+            width=width,
         )
