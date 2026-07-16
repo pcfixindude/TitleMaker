@@ -28,6 +28,8 @@ For best live use, open the app in a browser window and use fullscreen mode.
 - Export targets including multi-target export (Advanced)
 - Service log, CSV import/export, and batch export (Advanced)
 - Visual layout adjustments and numeric box controls (Advanced)
+- Interactive preview layout editor with click/keyboard guides (Advanced)
+- Preview Layout Controls under the preview (move/resize/font/auto-fit buttons)
 - Automatic local persistence for service logs and settings
 
 ## Setup
@@ -89,11 +91,38 @@ TitleMaker scans `fonts/` for `.ttf` / `.otf` files. Barlow Condensed ExtraBold 
 ## Advanced: Layout
 
 - Layout guides
+- **Interactive preview layout editor**
 - **Title Auto Layout**: auto-size title box between service and speaker, side padding, equal vertical gap
 - Visual nudge controls (position, size, font, skew)
 - Numeric X/Y/width/height, alignment, auto-size, line spacing
 
 When auto title layout is enabled, title X/Y/width/height are calculated and shown read-only. Font size, line spacing, and skew remain editable.
+
+## Interactive Preview Layout Editor
+
+Enable under **Advanced: Layout**:
+
+1. Turn on **Show layout guides** (optional for button panel).
+2. Turn on **Interactive preview layout editor**.
+3. Click a guide box on the preview (service, sermon title, or speaker).
+4. Use arrow keys to move the selected box.
+5. Press `+` / `-` to change font size.
+6. Double-click the **sermon title** guide to auto-fit it between the service line and speaker.
+
+Guides are drawn as an overlay for editing. Exported PNGs stay clean unless **Show layout guides** is enabled for debug export.
+
+## Preview Layout Controls
+
+Below the Booth Mode preview, open **Preview Layout Controls**:
+
+1. Choose Service Line, Sermon Title, or Speaker.
+2. Use ↑ ↓ ← → to move.
+3. Use Wider / Narrower / Taller / Shorter to resize.
+4. Use A− / A+ to change font size.
+5. Use **Auto-fit Title Between Service and Speaker** for a quick balanced title box.
+6. Optional: Center Horizontally, or Center Vertically in Available Space (title).
+
+These buttons always work, even if the interactive preview does not have keyboard focus.
 
 ## Advanced: Export Targets
 

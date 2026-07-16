@@ -46,6 +46,15 @@ from layout_controls import (
     resolve_auto_title_layout_settings,
     update_layout_box,
 )
+from layout_interaction import (
+    apply_layout_event,
+    auto_fit_title_box,
+    boxes_for_overlay,
+    center_box_horizontally,
+    center_title_vertically_in_available_space,
+    normalize_area_name,
+)
+from interactive_preview import render_interactive_preview
 from monark_schedule import (
     batch_export_candidates,
     entries_from_csv,
@@ -103,6 +112,7 @@ def main() -> None:
     today = date.today()
     _ensure_defaults(today)
     _restore_saved_session()
+    _consume_pending_layout_event()
 
     template_paths = list_template_backgrounds()
     font_paths = list_custom_fonts()
@@ -304,7 +314,9 @@ def main() -> None:
                 show_service_line,
                 shadow_enabled,
                 skew_enabled,
-                show_layout_guides,
+                # Guides are drawn by the interactive overlay when enabled.
+                show_layout_guides
+                and not st.session_state.get("interactive_preview_layout_editor", False),
                 st.session_state.selected_layout_area,
             )
             export_settings = _current_export_settings()
@@ -314,25 +326,45 @@ def main() -> None:
                 current_export_target,
                 st.session_state.export_layout_mode,
             )
-            output_name = export_filename_for_target(options, current_export_target)
+            # Clean export options (guides only when explicitly enabled for debug export).
+            export_options = _options_from_entry(
+                selected_entry,
+                sermon_title,
+                speaker_name,
+                text_color,
+                background_label,
+                background_labels,
+                template_paths,
+                effective_service_font,
+                effective_title_font,
+                effective_speaker_font,
+                font_labels,
+                font_paths,
+                show_service_line,
+                shadow_enabled,
+                skew_enabled,
+                show_layout_guides,
+                st.session_state.selected_layout_area,
+            )
+            output_name = export_filename_for_target(export_options, current_export_target)
 
             export_label = (
                 "Re-export Current Image"
                 if selected_entry.get("exported")
                 else "Export Current Image"
             )
-            if st.button(export_label, type="primary", use_container_width=True):
+            if st.button(export_label, type="primary", width="stretch"):
                 if not sermon_title.strip() or not speaker_name.strip():
                     st.warning(
                         "Title or speaker is blank. Confirm below to export anyway."
                     )
                     st.session_state.confirm_blank_export = True
                 else:
-                    _export_current(options)
+                    _export_current(export_options)
 
             if st.session_state.get("confirm_blank_export"):
-                if st.button("Confirm Blank Export", use_container_width=True):
-                    _export_current(options)
+                if st.button("Confirm Blank Export", width="stretch"):
+                    _export_current(export_options)
                     st.session_state.confirm_blank_export = False
 
             if st.session_state.get("last_export_path"):
@@ -343,14 +375,14 @@ def main() -> None:
                 data=_image_to_png_bytes(preview_image),
                 file_name=output_name,
                 mime="image/png",
-                use_container_width=True,
+                width="stretch",
             )
 
         with right:
             st.subheader("Preview")
-            st.image(preview_image, use_container_width=True)
-            st.caption(
-                f"{current_export_target.name} — {current_export_target.width}x{current_export_target.height}"
+            _render_booth_preview(
+                preview_image,
+                current_export_target,
             )
 
     st.divider()
@@ -652,6 +684,22 @@ def _render_advanced_fonts(font_labels: list[str]) -> None:
 
 def _render_advanced_layout() -> None:
     st.checkbox("Show layout guides", key="show_layout_guides")
+    st.checkbox(
+        "Interactive preview layout editor",
+        key="interactive_preview_layout_editor",
+        help=(
+            "Click the title guide, then use arrow keys to move it. "
+            "Press + or - to resize the title font. "
+            "Double-click the title guide to auto-fit the title area between "
+            "the service line and speaker."
+        ),
+    )
+    st.caption(
+        "Click the title guide, then use arrow keys to move it. Press + or - to "
+        "resize the title font. Double-click the title guide to auto-fit the "
+        "title area between the service line and speaker. "
+        "Use Preview Layout Controls under the preview for reliable buttons."
+    )
 
     st.markdown("#### Title Auto Layout")
     st.caption(
@@ -726,6 +774,316 @@ def _render_advanced_layout() -> None:
             disable_geometry=auto_title,
         )
         _box_controls("Speaker", "speaker_box")
+
+
+def _render_booth_preview(preview_image, current_export_target) -> None:
+    interactive = bool(st.session_state.get("interactive_preview_layout_editor", False))
+    show_guides = bool(st.session_state.get("show_layout_guides", False))
+
+    if interactive:
+        effective = get_effective_layout_boxes(_current_layout_settings())
+        overlay_settings = {
+            "service_box": effective["service_box"],
+            "title_box": effective["title_box"],
+            "speaker_box": effective["speaker_box"],
+        }
+        result = render_interactive_preview(
+            preview_image,
+            boxes_for_overlay(overlay_settings),
+            st.session_state.get("selected_layout_area", "Sermon Title"),
+            position_step=int(st.session_state.get("position_step", 5)),
+            font_step=int(st.session_state.get("font_step", 5)),
+            key="booth_interactive_preview",
+            on_layout_event=lambda: _stage_layout_event_from_component(
+                "booth_interactive_preview"
+            ),
+        )
+        _ = result  # Component mount result; events are applied via pending_layout_event.
+        st.caption(
+            f"Selected layout area: {st.session_state.get('selected_layout_area', 'Sermon Title')}"
+        )
+        st.caption(
+            "Controls: Arrow keys move, + / - resize font, double-click auto-fits title box."
+        )
+    else:
+        st.image(preview_image, width="stretch")
+
+    st.caption(
+        f"{current_export_target.name} — {current_export_target.width}x{current_export_target.height}"
+    )
+    if st.session_state.get("layout_autofit_message"):
+        st.success(st.session_state.layout_autofit_message)
+        st.session_state.layout_autofit_message = ""
+
+    controls_expanded = interactive or show_guides
+    with st.expander("Preview Layout Controls", expanded=controls_expanded):
+        _render_preview_layout_controls()
+
+
+def _render_preview_layout_controls() -> None:
+    st.caption(
+        "Reliable buttons for moving and resizing the selected text area. "
+        "Works even when keyboard focus is not in the interactive preview."
+    )
+    _sync_preview_area_selector()
+    area = st.selectbox(
+        "Adjust area",
+        ["Service Line", "Sermon Title", "Speaker"],
+        key="preview_adjust_area",
+        on_change=_on_preview_area_change,
+    )
+    area = normalize_area_name(area)
+
+    step_cols = st.columns(3)
+    position_step = step_cols[0].select_slider(
+        "Move step",
+        options=[1, 5, 10, 25, 50],
+        key="position_step",
+    )
+    size_step = step_cols[1].select_slider(
+        "Size step",
+        options=[1, 5, 10, 25, 50],
+        key="size_step",
+    )
+    font_step = step_cols[2].select_slider(
+        "Font step",
+        options=[1, 2, 5, 10, 25],
+        key="font_step",
+    )
+
+    st.caption("Move")
+    row = st.columns([1, 1, 1])
+    row[1].button(
+        "↑",
+        key="preview_move_up",
+        on_click=_preview_nudge,
+        args=(area, 0, -int(position_step), 0, 0),
+        width="stretch",
+    )
+    row = st.columns([1, 1, 1])
+    row[0].button(
+        "←",
+        key="preview_move_left",
+        on_click=_preview_nudge,
+        args=(area, -int(position_step), 0, 0, 0),
+        width="stretch",
+    )
+    row[1].markdown(
+        "<div style='text-align:center;padding-top:0.4rem'>Move</div>",
+        unsafe_allow_html=True,
+    )
+    row[2].button(
+        "→",
+        key="preview_move_right",
+        on_click=_preview_nudge,
+        args=(area, int(position_step), 0, 0, 0),
+        width="stretch",
+    )
+    row = st.columns([1, 1, 1])
+    row[1].button(
+        "↓",
+        key="preview_move_down",
+        on_click=_preview_nudge,
+        args=(area, 0, int(position_step), 0, 0),
+        width="stretch",
+    )
+
+    st.caption("Size")
+    size_row = st.columns(4)
+    size_row[0].button(
+        "Wider",
+        key="preview_wider",
+        on_click=_preview_nudge,
+        args=(area, 0, 0, int(size_step), 0),
+        width="stretch",
+    )
+    size_row[1].button(
+        "Narrower",
+        key="preview_narrower",
+        on_click=_preview_nudge,
+        args=(area, 0, 0, -int(size_step), 0),
+        width="stretch",
+    )
+    size_row[2].button(
+        "Taller",
+        key="preview_taller",
+        on_click=_preview_nudge,
+        args=(area, 0, 0, 0, int(size_step)),
+        width="stretch",
+    )
+    size_row[3].button(
+        "Shorter",
+        key="preview_shorter",
+        on_click=_preview_nudge,
+        args=(area, 0, 0, 0, -int(size_step)),
+        width="stretch",
+    )
+
+    st.caption("Font")
+    font_row = st.columns(2)
+    font_row[0].button(
+        "A−",
+        key="preview_font_minus",
+        on_click=_preview_font,
+        args=(area, -int(font_step)),
+        width="stretch",
+    )
+    font_row[1].button(
+        "A+",
+        key="preview_font_plus",
+        on_click=_preview_font,
+        args=(area, int(font_step)),
+        width="stretch",
+    )
+
+    center_row = st.columns(2)
+    center_row[0].button(
+        "Center Horizontally",
+        key="preview_center_h",
+        on_click=_preview_center_h,
+        args=(area,),
+        width="stretch",
+    )
+    center_row[1].button(
+        "Center Vertically in Available Space",
+        key="preview_center_v",
+        on_click=_preview_center_v,
+        width="stretch",
+    )
+
+    if st.button(
+        "Auto-fit Title Between Service and Speaker",
+        key="preview_autofit_title",
+        type="primary",
+        width="stretch",
+    ):
+        _apply_layout_dict(auto_fit_title_box(_current_layout_settings()))
+        st.session_state.selected_layout_area = "Sermon Title"
+        st.session_state.preview_adjust_area = "Sermon Title"
+        st.session_state.layout_autofit_message = (
+            "Title box auto-fit between service line and speaker."
+        )
+        st.rerun()
+
+
+def _current_layout_settings() -> dict:
+    return {
+        "service_box": st.session_state.service_box,
+        "title_box": st.session_state.title_box,
+        "speaker_box": st.session_state.speaker_box,
+        "selected_layout_area": st.session_state.get("selected_layout_area", "Sermon Title"),
+        "auto_title_box_between_service_and_speaker": st.session_state.get(
+            "auto_title_box_between_service_and_speaker", False
+        ),
+        "auto_title_area": st.session_state.get("auto_title_area", False),
+        "title_side_padding": st.session_state.get(
+            "title_side_padding", DEFAULT_TITLE_SIDE_PADDING
+        ),
+        "title_vertical_gap": st.session_state.get(
+            "title_vertical_gap", DEFAULT_TITLE_VERTICAL_GAP
+        ),
+    }
+
+
+def _apply_layout_dict(settings: dict) -> None:
+    st.session_state.service_box = settings["service_box"]
+    st.session_state.title_box = settings["title_box"]
+    st.session_state.speaker_box = settings["speaker_box"]
+    if "selected_layout_area" in settings:
+        st.session_state.selected_layout_area = settings["selected_layout_area"]
+    if "auto_title_box_between_service_and_speaker" in settings:
+        st.session_state.auto_title_box_between_service_and_speaker = settings[
+            "auto_title_box_between_service_and_speaker"
+        ]
+        st.session_state.auto_title_area = settings[
+            "auto_title_box_between_service_and_speaker"
+        ]
+
+
+def _sync_preview_area_selector() -> None:
+    if st.session_state.get("_layout_selection_from_event"):
+        st.session_state.preview_adjust_area = st.session_state.selected_layout_area
+        st.session_state._layout_selection_from_event = False
+    st.session_state.setdefault(
+        "preview_adjust_area",
+        st.session_state.get("selected_layout_area", "Sermon Title"),
+    )
+
+
+def _on_preview_area_change() -> None:
+    st.session_state.selected_layout_area = normalize_area_name(
+        st.session_state.preview_adjust_area
+    )
+
+
+def _on_advanced_area_change() -> None:
+    st.session_state.selected_layout_area = normalize_area_name(
+        st.session_state.advanced_layout_area
+    )
+
+
+def _preview_nudge(area: str, dx: int, dy: int, dw: int, dh: int) -> None:
+    settings = update_layout_box(
+        _current_layout_settings(), area, dx=dx, dy=dy, dw=dw, dh=dh
+    )
+    if area == "Sermon Title" and (dx or dy or dw or dh):
+        settings["auto_title_box_between_service_and_speaker"] = False
+        settings["auto_title_area"] = False
+    settings["selected_layout_area"] = area
+    _apply_layout_dict(settings)
+
+
+def _preview_font(area: str, delta: int) -> None:
+    settings = apply_layout_event(
+        _current_layout_settings(),
+        {"event": "font", "area": area, "font_delta": delta},
+        font_step=abs(delta) or 5,
+    )["settings"]
+    _apply_layout_dict(settings)
+
+
+def _preview_center_h(area: str) -> None:
+    settings = center_box_horizontally(_current_layout_settings(), area)
+    if area == "Sermon Title":
+        settings["auto_title_box_between_service_and_speaker"] = False
+        settings["auto_title_area"] = False
+    settings["selected_layout_area"] = area
+    _apply_layout_dict(settings)
+
+
+def _preview_center_v() -> None:
+    settings = center_title_vertically_in_available_space(_current_layout_settings())
+    settings["auto_title_box_between_service_and_speaker"] = False
+    settings["auto_title_area"] = False
+    settings["selected_layout_area"] = "Sermon Title"
+    _apply_layout_dict(settings)
+
+
+def _stage_layout_event_from_component(component_key: str) -> None:
+    state = st.session_state.get(component_key) or {}
+    event = state.get("layout_event")
+    if isinstance(event, dict):
+        st.session_state.pending_layout_event = event
+
+
+def _consume_pending_layout_event() -> None:
+    event = st.session_state.pop("pending_layout_event", None)
+    if not isinstance(event, dict):
+        return
+    result = apply_layout_event(
+        _current_layout_settings(),
+        event,
+        position_step=int(st.session_state.get("position_step", 5)),
+        font_step=int(st.session_state.get("font_step", 5)),
+        size_step=int(st.session_state.get("size_step", 10)),
+    )
+    _apply_layout_dict(result["settings"])
+    st.session_state.selected_layout_area = result["selected_area"]
+    st.session_state._layout_selection_from_event = True
+    if result.get("auto_fit_applied"):
+        st.session_state.layout_autofit_message = result.get("message") or (
+            "Title box auto-fit between service line and speaker."
+        )
 
 
 def _render_advanced_export_targets() -> None:
@@ -821,6 +1179,10 @@ def _ensure_defaults(today: date) -> None:
     st.session_state.setdefault("auto_title_box_between_service_and_speaker", True)
     st.session_state.setdefault("title_side_padding", DEFAULT_TITLE_SIDE_PADDING)
     st.session_state.setdefault("title_vertical_gap", DEFAULT_TITLE_VERTICAL_GAP)
+    st.session_state.setdefault("interactive_preview_layout_editor", False)
+    st.session_state.setdefault("layout_autofit_message", "")
+    st.session_state.setdefault("pending_layout_event", None)
+    st.session_state.setdefault("last_layout_event_nonce", None)
     st.session_state.setdefault(
         "auto_title_area",
         st.session_state.auto_title_box_between_service_and_speaker,
@@ -1063,35 +1425,35 @@ def _box_controls(
 
 
 def _visual_layout_controls(*, disable_title_geometry: bool = False) -> None:
+    # Keep a separate widget key from Preview Layout Controls to avoid duplicates.
+    st.session_state.setdefault(
+        "advanced_layout_area",
+        st.session_state.get("selected_layout_area", "Sermon Title"),
+    )
+    if st.session_state.get("_layout_selection_from_event"):
+        st.session_state.advanced_layout_area = st.session_state.selected_layout_area
     selected_area = st.selectbox(
         "Text area to adjust",
         list(AREA_KEYS.keys()),
-        index=_choice_index(list(AREA_KEYS.keys()), st.session_state.selected_layout_area),
-        key="selected_layout_area",
+        key="advanced_layout_area",
+        on_change=_on_advanced_area_change,
     )
-    steps = st.columns(4)
-    position_step = steps[0].select_slider(
-        "Position step",
-        options=[1, 5, 10, 25, 50],
-        value=st.session_state.position_step,
-        key="position_step",
+    selected_area = normalize_area_name(selected_area)
+    st.session_state.selected_layout_area = selected_area
+
+    # Step values come from Preview Layout Controls (or defaults).
+    position_step = int(st.session_state.get("position_step", 5))
+    size_step = int(st.session_state.get("size_step", 10))
+    font_step = int(st.session_state.get("font_step", 5))
+    skew_step = float(st.session_state.get("skew_step", 2.0))
+    st.caption(
+        f"Using move step {position_step}, size step {size_step}, "
+        f"font step {font_step}. Change steps under Preview Layout Controls."
     )
-    size_step = steps[1].select_slider(
-        "Size step",
-        options=[1, 5, 10, 25, 50],
-        value=st.session_state.size_step,
-        key="size_step",
-    )
-    font_step = steps[2].select_slider(
-        "Font step",
-        options=[1, 2, 5, 10, 25],
-        value=st.session_state.font_step,
-        key="font_step",
-    )
-    skew_step = steps[3].select_slider(
+    skew_step = st.select_slider(
         "Skew step",
         options=[0.5, 1.0, 2.0, 5.0],
-        value=st.session_state.skew_step,
+        value=skew_step if skew_step in {0.5, 1.0, 2.0, 5.0} else 2.0,
         key="skew_step",
     )
 
@@ -1104,28 +1466,100 @@ def _visual_layout_controls(*, disable_title_geometry: bool = False) -> None:
     else:
         st.caption("Position")
         row = st.columns([1, 1, 1])
-        row[1].button("Up", on_click=_nudge_box, args=(selected_area, 0, -position_step, 0, 0), use_container_width=True)
+        row[1].button(
+            "Up",
+            key="adv_move_up",
+            on_click=_nudge_box,
+            args=(selected_area, 0, -position_step, 0, 0),
+            width="stretch",
+        )
         row = st.columns([1, 1, 1])
-        row[0].button("Left", on_click=_nudge_box, args=(selected_area, -position_step, 0, 0, 0), use_container_width=True)
+        row[0].button(
+            "Left",
+            key="adv_move_left",
+            on_click=_nudge_box,
+            args=(selected_area, -position_step, 0, 0, 0),
+            width="stretch",
+        )
         row[1].markdown("<div style='text-align:center'>Move</div>", unsafe_allow_html=True)
-        row[2].button("Right", on_click=_nudge_box, args=(selected_area, position_step, 0, 0, 0), use_container_width=True)
+        row[2].button(
+            "Right",
+            key="adv_move_right",
+            on_click=_nudge_box,
+            args=(selected_area, position_step, 0, 0, 0),
+            width="stretch",
+        )
         row = st.columns([1, 1, 1])
-        row[1].button("Down", on_click=_nudge_box, args=(selected_area, 0, position_step, 0, 0), use_container_width=True)
+        row[1].button(
+            "Down",
+            key="adv_move_down",
+            on_click=_nudge_box,
+            args=(selected_area, 0, position_step, 0, 0),
+            width="stretch",
+        )
 
         st.caption("Size")
         row = st.columns(4)
-        row[0].button("Wider", on_click=_nudge_box, args=(selected_area, 0, 0, size_step, 0), use_container_width=True)
-        row[1].button("Narrower", on_click=_nudge_box, args=(selected_area, 0, 0, -size_step, 0), use_container_width=True)
-        row[2].button("Taller", on_click=_nudge_box, args=(selected_area, 0, 0, 0, size_step), use_container_width=True)
-        row[3].button("Shorter", on_click=_nudge_box, args=(selected_area, 0, 0, 0, -size_step), use_container_width=True)
+        row[0].button(
+            "Wider",
+            key="adv_wider",
+            on_click=_nudge_box,
+            args=(selected_area, 0, 0, size_step, 0),
+            width="stretch",
+        )
+        row[1].button(
+            "Narrower",
+            key="adv_narrower",
+            on_click=_nudge_box,
+            args=(selected_area, 0, 0, -size_step, 0),
+            width="stretch",
+        )
+        row[2].button(
+            "Taller",
+            key="adv_taller",
+            on_click=_nudge_box,
+            args=(selected_area, 0, 0, 0, size_step),
+            width="stretch",
+        )
+        row[3].button(
+            "Shorter",
+            key="adv_shorter",
+            on_click=_nudge_box,
+            args=(selected_area, 0, 0, 0, -size_step),
+            width="stretch",
+        )
 
     st.caption("Font")
     row = st.columns(2 if selected_area != "Sermon Title" else 4)
-    row[0].button("A+", on_click=_nudge_font, args=(selected_area, font_step), use_container_width=True)
-    row[1].button("A-", on_click=_nudge_font, args=(selected_area, -font_step), use_container_width=True)
+    row[0].button(
+        "A+",
+        key="adv_font_plus",
+        on_click=_nudge_font,
+        args=(selected_area, font_step),
+        width="stretch",
+    )
+    row[1].button(
+        "A-",
+        key="adv_font_minus",
+        on_click=_nudge_font,
+        args=(selected_area, -font_step),
+        width="stretch",
+    )
     if selected_area == "Sermon Title":
-        row[2].button("Italic +", on_click=_nudge_skew, args=(selected_area, skew_step), use_container_width=True)
-        row[3].button("Italic -", on_click=_nudge_skew, args=(selected_area, -skew_step), use_container_width=True)
+        row[2].button(
+            "Italic +",
+            key="adv_skew_plus",
+            on_click=_nudge_skew,
+            args=(selected_area, skew_step),
+            width="stretch",
+        )
+        row[3].button(
+            "Italic -",
+            key="adv_skew_minus",
+            on_click=_nudge_skew,
+            args=(selected_area, -skew_step),
+            width="stretch",
+        )
 
 
 def _layout_settings() -> dict:
