@@ -297,9 +297,12 @@ def render_text_in_box(
     for line in lines:
         line_width = _text_width(draw, line, font)
         x = origin_x + max(0, (box.width - line_width) // 2)
+        # Use top-left anchoring so measured glyph height matches drawn ink.
+        # Pillow's default ascent anchor shifts large titles down and makes them
+        # look too small / off-center inside the title box.
         if shadow_enabled:
-            _draw_text_shadow(draw, (x, y), line, font)
-        draw.text((x, y), line, font=font, fill=fill)
+            _draw_text_shadow(draw, (x, y), line, font, anchor="lt")
+        draw.text((x, y), line, font=font, fill=fill, anchor="lt")
         y += line_height
 
 
@@ -771,6 +774,7 @@ def _draw_text_shadow(
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     radius: int = 3,
     offset: tuple[int, int] = (5, 5),
+    anchor: str = "lt",
 ) -> None:
     # Kept only for optional/debug use; simplified app never enables shadow.
     x, y = xy
@@ -781,4 +785,5 @@ def _draw_text_shadow(
                 text,
                 font=font,
                 fill=(0, 0, 0, 105),
+                anchor=anchor,
             )

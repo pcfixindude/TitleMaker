@@ -141,6 +141,44 @@ class SimplifiedTitleFitTest(unittest.TestCase):
         self.assertGreaterEqual(y, box.y)
         self.assertLessEqual(y + block_height, box.y + box.height)
 
+    def test_short_title_ink_fills_title_box_when_rendered(self) -> None:
+        """Large short titles must draw inside the title box (lt anchor)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bg = Path(temp_dir) / "black.png"
+            Image.new("RGB", CANVAS_SIZE, (0, 0, 0)).save(bg)
+            image = render_title_image(
+                TitleImageOptions(
+                    day="Friday",
+                    service="Evening",
+                    service_date=date(2026, 7, 31),
+                    sermon_title="TALLER",
+                    speaker_name="",
+                    background_path=bg,
+                    show_service_line=False,
+                    service_line_box=text_box_from_dict(DEFAULT_SERVICE_BOX),
+                    title_box=text_box_from_dict(DEFAULT_TITLE_BOX),
+                    speaker_box=text_box_from_dict(DEFAULT_SPEAKER_BOX),
+                )
+            )
+
+        title = DEFAULT_TITLE_BOX
+        top = title["y"]
+        bottom = title["y"] + title["height"]
+        ink_rows = [
+            y
+            for y in range(top, bottom)
+            if any(image.getpixel((x, y))[0] > 200 for x in range(title["x"], title["x"] + title["width"], 8))
+        ]
+        self.assertTrue(ink_rows)
+        ink_span = max(ink_rows) - min(ink_rows) + 1
+        self.assertGreaterEqual(ink_span / title["height"], 0.85)
+        # Must not spill into the speaker band.
+        spill = any(
+            image.getpixel((title["x"] + title["width"] // 2, y))[0] > 200
+            for y in range(bottom + 1, DEFAULT_SPEAKER_BOX["y"])
+        )
+        self.assertFalse(spill)
+
     def test_title_font_can_grow_up_to_max(self) -> None:
         size = fit_title_font_size_for_test(
             "GO",
