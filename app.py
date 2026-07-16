@@ -16,6 +16,7 @@ from title_renderer import (
     DEFAULT_SPEAKER_BOX,
     DEFAULT_TITLE_BOX,
     EXPORTS_DIR,
+    LAYOUT_DEFAULTS_VERSION,
     TitleImageOptions,
     default_font_path,
     ensure_project_dirs,
@@ -175,6 +176,7 @@ def main() -> None:
             f"Title box y={options.title_box.y if options.title_box else DEFAULT_TITLE_BOX['y']} "
             f"h={options.title_box.height if options.title_box else DEFAULT_TITLE_BOX['height']}"
         )
+        st.caption("Short titles automatically grow to fill the title area.")
 
 
 def _box_controls(heading: str, prefix: str, label: str) -> None:
@@ -224,11 +226,16 @@ def _ensure_simple_defaults() -> None:
         "simple_font_path",
         str(BARLOW_BOLD_ITALIC if BARLOW_BOLD_ITALIC.exists() else ""),
     )
-    for prefix, defaults in BOX_DEFAULTS.items():
-        st.session_state.setdefault(f"simple_{prefix}_x", defaults["x"])
-        st.session_state.setdefault(f"simple_{prefix}_y", defaults["y"])
-        st.session_state.setdefault(f"simple_{prefix}_width", defaults["width"])
-        st.session_state.setdefault(f"simple_{prefix}_height", defaults["height"])
+    # Refresh box defaults when the layout version changes (keeps Reset in sync).
+    if st.session_state.get("simple_layout_version") != LAYOUT_DEFAULTS_VERSION:
+        _reset_box_defaults()
+        st.session_state.simple_layout_version = LAYOUT_DEFAULTS_VERSION
+    else:
+        for prefix, defaults in BOX_DEFAULTS.items():
+            st.session_state.setdefault(f"simple_{prefix}_x", defaults["x"])
+            st.session_state.setdefault(f"simple_{prefix}_y", defaults["y"])
+            st.session_state.setdefault(f"simple_{prefix}_width", defaults["width"])
+            st.session_state.setdefault(f"simple_{prefix}_height", defaults["height"])
 
 
 def _reset_box_defaults() -> None:

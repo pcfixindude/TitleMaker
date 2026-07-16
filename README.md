@@ -26,42 +26,28 @@ streamlit run app.py
 - All text is **white** with **no shadow**
 - Service line and speaker stay on **one line** and auto-shrink to fit their boxes
 - Sermon title auto-fits inside the **title box**:
-  - 1 line if it fits
-  - otherwise wrap to **2 lines max**, then shrink until it fits
+  - Short titles grow aggressively to fill the title area height
+  - 1 line if it fits at a large size
+  - otherwise wrap to **2 lines max**, then maximize font size for that wrap
 - Manual line breaks in the title are kept when they are 2 lines or fewer
 
-## Bounding boxes
+## Default bounding boxes (1920×1080)
 
-The main page has visible controls for three regions:
+| Region | X | Y | Width | Height |
+| --- | ---: | ---: | ---: | ---: |
+| Service Line | 280 | 95 | 1360 | 90 |
+| Sermon Title | 30 | 195 | 1860 | 460 |
+| Speaker / Minister | 280 | 665 | 1360 | 90 |
 
-| Region | Controls |
-| --- | --- |
-| Service Line Box | Service X / Y / Width / Height |
-| Sermon Title Box | Title X / Y / Width / Height |
-| Speaker / Minister Box | Speaker X / Y / Width / Height |
+**Reset boxes to defaults** restores these values.
 
-Default starting values (1920×1080, above the open Bible):
-
-- Service: x=280, y=95, w=1360, h=90
-- Title: x=180, y=180, w=1560, h=520
-- Speaker: x=280, y=760, w=1360, h=90
-
-Use **Show bounding boxes** to draw preview guides around those regions.  
-**Export PNG** and **Download clean PNG** never include the guides.
-
-**Reset boxes to defaults** restores the starting layout.
+Use **Show bounding boxes** for preview guides only. Export stays clean.
 
 ## Export
 
 - Size: 1920×1080 PNG
 - Folder: `exports/`
 - Name example: `2026-07-31_FRIDAY_AM_THE_TRUTH_THE_WHOLE_TRUTH.png`
-
-## Folders
-
-- `fonts/` — BarlowCondensed-BoldItalic.ttf
-- `templates/` — background images
-- `exports/` — exported PNGs
 
 ## Tests
 

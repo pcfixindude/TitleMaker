@@ -20,16 +20,20 @@ BARLOW_BOLD_ITALIC = FONTS_DIR / "BarlowCondensed-BoldItalic.ttf"
 BEBAS_FONT = FONTS_DIR / "BebasNeue-Regular.ttf"
 FONT_EXTENSIONS = {".ttf", ".otf"}
 
-MAX_TITLE_FONT_SIZE = 400
+MAX_TITLE_FONT_SIZE = 520
+# Barlow glyph height is often shorter than the em-size; allow searching above the
+# box height so short titles can truly fill the title area.
+TITLE_FONT_SEARCH_SCALE = 2.2
 MIN_TITLE_FONT_SIZE = 28
 MIN_SINGLE_LINE_FONT_SIZE = 28
-TITLE_LINE_SPACING = 0.92
+TITLE_LINE_SPACING = 0.95
 TEXT_COLOR_WHITE = "#FFFFFF"
+LAYOUT_DEFAULTS_VERSION = 5
 
 # Default boxes tuned for the open-Bible template (1920x1080).
 DEFAULT_SERVICE_BOX = {"x": 280, "y": 95, "width": 1360, "height": 90}
-DEFAULT_TITLE_BOX = {"x": 180, "y": 180, "width": 1560, "height": 520}
-DEFAULT_SPEAKER_BOX = {"x": 280, "y": 760, "width": 1360, "height": 90}
+DEFAULT_TITLE_BOX = {"x": 30, "y": 195, "width": 1860, "height": 460}
+DEFAULT_SPEAKER_BOX = {"x": 280, "y": 665, "width": 1360, "height": 90}
 
 # Compatibility aliases for unused legacy modules.
 SERVICE_BOX = dict(DEFAULT_SERVICE_BOX)
@@ -84,8 +88,8 @@ class TitleImageOptions:
     title_box: TextBox | None = None
     speaker_box: TextBox | None = None
     top_line_position: tuple[int, int] = (960, 95)
-    title_position: tuple[int, int] = (960, 440)
-    bottom_line_position: tuple[int, int] = (960, 760)
+    title_position: tuple[int, int] = (960, 425)
+    bottom_line_position: tuple[int, int] = (960, 665)
     text_alignment: str = "center"
 
 
@@ -272,12 +276,12 @@ def render_text_in_box(
     if not text:
         return
     if mode == "title":
-        font, lines, line_height, _, block_height = fit_title_one_or_two_lines(
+        font, lines, line_height, _, block_height = fit_title_max_2_lines(
             text,
             max_width=box.width,
             max_height=box.height,
             font_path=font_path,
-            max_font_size=box.max_font_size,
+            max_font_size=max(box.max_font_size, MAX_TITLE_FONT_SIZE),
             line_spacing=box.line_spacing,
         )
     else:
@@ -288,14 +292,92 @@ def render_text_in_box(
             font_path=font_path,
         )
 
-    y = box.y + max(0, (box.height - block_height) // 2)
+    origin_x, origin_y = center_text_block_in_box(box, block_height)
+    y = origin_y
     for line in lines:
         line_width = _text_width(draw, line, font)
-        x = box.x + max(0, (box.width - line_width) // 2)
+        x = origin_x + max(0, (box.width - line_width) // 2)
         if shadow_enabled:
             _draw_text_shadow(draw, (x, y), line, font)
         draw.text((x, y), line, font=font, fill=fill)
         y += line_height
+
+
+def center_text_block_in_box(box: TextBox, block_height: int) -> tuple[int, int]:
+    """Return top-left origin so the text block is centered in the box."""
+    x = box.x
+    y = box.y + max(0, (box.height - block_height) // 2)
+    return x, y
+
+
+def measure_text_block(
+    lines: list[str],
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    *,
+    line_spacing: float = TITLE_LINE_SPACING,
+    draw: ImageDraw.ImageDraw | None = None,
+) -> tuple[int, int, int]:
+    """Return (block_width, line_stride, block_height) for a line layout."""
+    probe = draw or ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    if not lines:
+        size = int(getattr(font, "size", 1) or 1)
+        return 0, size, 0
+
+    size = int(getattr(font, "size", 1) or 1)
+    widths = [_text_width(probe, line, font) for line in lines]
+    glyph_heights = [_text_height(probe, line, font) for line in lines]
+    max_glyph = max(glyph_heights)
+    # Stride uses the larger of spacing-based size and real glyph height so short
+    # titles can grow until they nearly fill the box height.
+    line_stride = max(1, max_glyph, round(size * line_spacing))
+    if len(lines) == 1:
+        block_height = max_glyph
+    else:
+        block_height = line_stride * (len(lines) - 1) + max_glyph
+    return max(widths), line_stride, block_height
+
+
+def find_largest_fitting_font_size(
+    lines: list[str],
+    max_width: int,
+    max_height: int,
+    font_path: Path | None = None,
+    max_font_size: int = MAX_TITLE_FONT_SIZE,
+    min_font_size: int = MIN_TITLE_FONT_SIZE,
+    line_spacing: float = TITLE_LINE_SPACING,
+) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, int, int, int, int]:
+    """Binary-search the largest font size where the fixed line layout fits."""
+    probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    hi = max(
+        min_font_size,
+        int(max_font_size),
+        MAX_TITLE_FONT_SIZE,
+        int(max_height * TITLE_FONT_SEARCH_SCALE),
+    )
+    lo = min_font_size
+    best_font = _load_font(lo, font_path)
+    best_stride = lo
+    best_width = 0
+    best_height = 0
+    best_size = lo
+
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        font = _load_font(mid, font_path)
+        block_width, stride, block_height = measure_text_block(
+            lines, font, line_spacing=line_spacing, draw=probe
+        )
+        if block_width <= max_width and block_height <= max_height:
+            best_font = font
+            best_stride = stride
+            best_width = block_width
+            best_height = block_height
+            best_size = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    return best_font, best_size, best_stride, best_width, best_height
 
 
 def fit_single_line_text(
@@ -306,27 +388,59 @@ def fit_single_line_text(
     max_font_size: int = 120,
     min_font_size: int = MIN_SINGLE_LINE_FONT_SIZE,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
+    return fit_service_text_one_line(
+        text,
+        max_width=max_width,
+        max_height=max_height,
+        font_path=font_path,
+        max_font_size=max_font_size,
+        min_font_size=min_font_size,
+    )
+
+
+def fit_service_text_one_line(
+    text: str,
+    max_width: int,
+    max_height: int,
+    font_path: Path | None = None,
+    max_font_size: int = 120,
+    min_font_size: int = MIN_SINGLE_LINE_FONT_SIZE,
+) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
     cleaned = " ".join(text.strip().upper().split())
-    probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
     if not cleaned:
         font = _load_font(max_font_size, font_path)
         return font, [], max(1, max_font_size), 0, 0
-
-    start = max(min_font_size, min(int(max_font_size), max(1, max_height)))
-    for size in range(start, min_font_size - 1, -1):
-        font = _load_font(size, font_path)
-        width = _text_width(probe, cleaned, font)
-        height = max(1, size)
-        if width <= max_width and height <= max_height:
-            return font, [cleaned], height, width, height
-
-    font = _load_font(min_font_size, font_path)
-    width = _text_width(probe, cleaned, font)
-    height = max(1, min_font_size)
-    return font, [cleaned], height, width, height
+    font, _, stride, width, height = find_largest_fitting_font_size(
+        [cleaned],
+        max_width=max_width,
+        max_height=max_height,
+        font_path=font_path,
+        max_font_size=min(max_font_size, max(1, max_height)),
+        min_font_size=min_font_size,
+        line_spacing=1.0,
+    )
+    return font, [cleaned], stride, width, height
 
 
-def fit_title_one_or_two_lines(
+def fit_speaker_text_one_line(
+    text: str,
+    max_width: int,
+    max_height: int,
+    font_path: Path | None = None,
+    max_font_size: int = 120,
+    min_font_size: int = MIN_SINGLE_LINE_FONT_SIZE,
+) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
+    return fit_service_text_one_line(
+        text,
+        max_width=max_width,
+        max_height=max_height,
+        font_path=font_path,
+        max_font_size=max_font_size,
+        min_font_size=min_font_size,
+    )
+
+
+def fit_title_max_2_lines(
     title: str,
     max_width: int,
     max_height: int,
@@ -335,35 +449,76 @@ def fit_title_one_or_two_lines(
     min_font_size: int = MIN_TITLE_FONT_SIZE,
     line_spacing: float = TITLE_LINE_SPACING,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
-    """Fit title to at most 2 lines, preferring 1 line when possible."""
-    probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    """Maximize font size for a 1- or 2-line title that fits the title box."""
     cleaned = format_title(title)
+    ceiling = max(
+        int(max_font_size),
+        MAX_TITLE_FONT_SIZE,
+        int(max_height * TITLE_FONT_SEARCH_SCALE),
+    )
     if not cleaned:
-        font = _load_font(max_font_size, font_path)
-        return font, [], max(1, round(max_font_size * line_spacing)), 0, 0
+        font = _load_font(min(ceiling, MAX_TITLE_FONT_SIZE), font_path)
+        return font, [], max(1, round(MAX_TITLE_FONT_SIZE * line_spacing)), 0, 0
 
-    start = max(min_font_size, min(int(max_font_size), MAX_TITLE_FONT_SIZE))
-    for size in range(start, min_font_size - 1, -2):
-        font = _load_font(size, font_path)
-        line_height = max(1, round(size * line_spacing))
-        lines = _choose_title_lines(cleaned, font, max_width, probe)
-        if len(lines) > 2:
-            continue
-        block_width = max((_text_width(probe, line, font) for line in lines), default=0)
-        block_height = line_height * len(lines)
-        if block_width <= max_width and block_height <= max_height:
-            return font, lines, line_height, block_width, block_height
+    candidates = _title_layout_candidates(cleaned)
+    probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    best: tuple[
+        ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int
+    ] | None = None
+    best_score: tuple[int, int, int] | None = None
 
-    font = _load_font(min_font_size, font_path)
-    lines = _choose_title_lines(cleaned, font, max_width, probe)[:2]
-    line_height = max(1, round(min_font_size * line_spacing))
-    block_width = max((_text_width(probe, line, font) for line in lines), default=0)
-    block_height = line_height * len(lines)
-    return font, lines, line_height, block_width, block_height
+    for lines in candidates:
+        font, size, stride, width, height = find_largest_fitting_font_size(
+            lines,
+            max_width=max_width,
+            max_height=max_height,
+            font_path=font_path,
+            max_font_size=ceiling,
+            min_font_size=min_font_size,
+            line_spacing=line_spacing,
+        )
+        if size < min_font_size or width > max_width or height > max_height:
+            # find_largest always returns something; reject if it still overflows.
+            if width > max_width or height > max_height:
+                continue
+        balance = 0
+        if len(lines) == 2:
+            balance = abs(
+                _text_width(probe, lines[0], font) - _text_width(probe, lines[1], font)
+            )
+        # Prefer larger fonts; near ties prefer one line, then balanced wraps.
+        score = (size, -len(lines), -balance)
+        if best_score is None or score > best_score:
+            best = (font, lines, stride, width, height)
+            best_score = score
+
+    if best is None:
+        font = _load_font(min_font_size, font_path)
+        lines = candidates[0][:2]
+        width, stride, height = measure_text_block(
+            lines, font, line_spacing=line_spacing
+        )
+        return font, lines, stride, width, height
+
+    return best
 
 
-# Backward-compatible alias used by older tests.
-fit_title_two_lines = fit_title_one_or_two_lines
+# Backward-compatible aliases used by older tests / call sites.
+fit_title_one_or_two_lines = fit_title_max_2_lines
+fit_title_two_lines = fit_title_max_2_lines
+
+
+def _title_layout_candidates(cleaned: str) -> list[list[str]]:
+    manual = [line for line in cleaned.splitlines() if line.strip()]
+    if len(manual) >= 2:
+        return [[manual[0], " ".join(manual[1:])]]
+    text = manual[0] if manual else cleaned
+    candidates: list[list[str]] = [[text]]
+    words = text.split()
+    if len(words) >= 2:
+        for split in range(1, len(words)):
+            candidates.append([" ".join(words[:split]), " ".join(words[split:])])
+    return candidates
 
 
 def choose_best_two_line_wrap(
@@ -396,8 +551,8 @@ def draw_preview_guides(
 
 def fit_title_metrics_for_test(
     title: str,
-    max_width: int = 1560,
-    max_height: int = 520,
+    max_width: int = DEFAULT_TITLE_BOX["width"],
+    max_height: int = DEFAULT_TITLE_BOX["height"],
     font_size: int = MAX_TITLE_FONT_SIZE,
     auto_size: bool = True,
     line_spacing: float = TITLE_LINE_SPACING,
@@ -406,10 +561,11 @@ def fit_title_metrics_for_test(
         font = _load_font(font_size, default_font_path())
         probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
         lines = _choose_title_lines(format_title(title), font, max_width, probe)
-        line_height = max(1, round(font_size * line_spacing))
-        block_width = max((_text_width(probe, line, font) for line in lines), default=0)
-        return font, lines, line_height, block_width, line_height * len(lines)
-    return fit_title_one_or_two_lines(
+        width, stride, height = measure_text_block(
+            lines, font, line_spacing=line_spacing, draw=probe
+        )
+        return font, lines, stride, width, height
+    return fit_title_max_2_lines(
         title,
         max_width=max_width,
         max_height=max_height,
@@ -421,19 +577,25 @@ def fit_title_metrics_for_test(
 
 def fit_title_lines_for_test(
     title: str,
-    max_width: int = 1560,
+    max_width: int = DEFAULT_TITLE_BOX["width"],
     font_size: int = 218,
     font_path: Path | None = None,
 ) -> list[str]:
-    font = _load_font(font_size, font_path or default_font_path())
-    draw = ImageDraw.Draw(Image.new("RGB", (10, 10)))
-    return _choose_title_lines(format_title(title), font, max_width, draw)
+    # Use the maximized layout so tests see the same wrap choices as the renderer.
+    _, lines, _, _, _ = fit_title_max_2_lines(
+        title,
+        max_width=max_width,
+        max_height=DEFAULT_TITLE_BOX["height"],
+        font_path=font_path or default_font_path(),
+        max_font_size=max(font_size, MAX_TITLE_FONT_SIZE),
+    )
+    return lines
 
 
 def fit_title_font_size_for_test(
     title: str,
-    max_width: int = 1560,
-    max_height: int = 520,
+    max_width: int = DEFAULT_TITLE_BOX["width"],
+    max_height: int = DEFAULT_TITLE_BOX["height"],
     font_size: int = MAX_TITLE_FONT_SIZE,
 ) -> int:
     font, _, _, _, _ = fit_title_metrics_for_test(
@@ -591,6 +753,15 @@ def _text_width(
 ) -> int:
     bbox = draw.textbbox((0, 0), text, font=font)
     return bbox[2] - bbox[0]
+
+
+def _text_height(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+) -> int:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return max(1, bbox[3] - bbox[1])
 
 
 def _draw_text_shadow(

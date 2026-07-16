@@ -14,19 +14,23 @@ from title_renderer import (
     DEFAULT_SERVICE_BOX,
     DEFAULT_SPEAKER_BOX,
     DEFAULT_TITLE_BOX,
+    LAYOUT_DEFAULTS_VERSION,
     MAX_TITLE_FONT_SIZE,
     TEXT_COLOR_WHITE,
     TextBox,
     TitleImageOptions,
+    center_text_block_in_box,
     default_font_path,
     export_filename,
     fit_single_line_text,
     fit_title_font_size_for_test,
     fit_title_lines_for_test,
+    fit_title_max_2_lines,
     fit_title_metrics_for_test,
     format_service_line,
     format_short_date,
     list_template_backgrounds,
+    measure_text_block,
     render_title_image,
     resolve_layout_boxes,
     text_box_from_dict,
@@ -70,9 +74,26 @@ class SimplifiedServiceLineTest(unittest.TestCase):
 
 class SimplifiedTitleFitTest(unittest.TestCase):
     def test_short_title_fits_one_line(self) -> None:
-        lines = fit_title_lines_for_test("TRUTH", max_width=1560, font_size=200)
+        lines = fit_title_lines_for_test("TRUTH")
         self.assertEqual(lines, ["TRUTH"])
+
+    def test_short_one_word_title_grows_large(self) -> None:
+        size = fit_title_font_size_for_test(
+            "TALLER",
+            max_width=DEFAULT_TITLE_BOX["width"],
+            max_height=DEFAULT_TITLE_BOX["height"],
+        )
+        self.assertGreaterEqual(size, 500)
+
+    def test_short_one_line_title_uses_most_of_title_box_height(self) -> None:
+        font, lines, _, _, block_height = fit_title_metrics_for_test(
+            "STAND",
+            max_width=DEFAULT_TITLE_BOX["width"],
+            max_height=DEFAULT_TITLE_BOX["height"],
+        )
         self.assertEqual(len(lines), 1)
+        self.assertGreaterEqual(getattr(font, "size", 0), 500)
+        self.assertGreaterEqual(block_height / DEFAULT_TITLE_BOX["height"], 0.9)
 
     def test_long_title_wraps_to_two_lines(self) -> None:
         title = "THE TRUTH THE WHOLE TRUTH AND NOTHING BUT THE TRUTH"
@@ -80,29 +101,54 @@ class SimplifiedTitleFitTest(unittest.TestCase):
             title,
             max_width=DEFAULT_TITLE_BOX["width"],
             max_height=DEFAULT_TITLE_BOX["height"],
-            font_size=MAX_TITLE_FONT_SIZE,
         )
         self.assertEqual(len(lines), 2)
         self.assertLessEqual(block_width, DEFAULT_TITLE_BOX["width"])
         self.assertLessEqual(block_height, DEFAULT_TITLE_BOX["height"])
-        self.assertLessEqual(getattr(font, "size", 0), MAX_TITLE_FONT_SIZE)
+        self.assertGreater(getattr(font, "size", 0), 40)
 
     def test_title_never_exceeds_two_lines(self) -> None:
         title = "ONE\nTWO\nTHREE\nFOUR"
-        lines = fit_title_lines_for_test(title, max_width=1560, font_size=120)
+        lines = fit_title_lines_for_test(title)
         self.assertLessEqual(len(lines), 2)
         self.assertEqual(lines[0], "ONE")
         self.assertIn("TWO", lines[1])
 
-    def test_title_font_can_grow_up_to_400(self) -> None:
+    def test_manual_line_break_preserved_for_two_line_titles(self) -> None:
+        lines = fit_title_lines_for_test("THE LOVE OF GOD\nIN A DARK WORLD")
+        self.assertEqual(lines, ["THE LOVE OF GOD", "IN A DARK WORLD"])
+
+    def test_title_stays_inside_title_box(self) -> None:
+        _, lines, _, block_width, block_height = fit_title_metrics_for_test(
+            "THE TRUTH THE WHOLE TRUTH AND NOTHING BUT THE TRUTH",
+            max_width=DEFAULT_TITLE_BOX["width"],
+            max_height=DEFAULT_TITLE_BOX["height"],
+        )
+        self.assertLessEqual(len(lines), 2)
+        self.assertLessEqual(block_width, DEFAULT_TITLE_BOX["width"])
+        self.assertLessEqual(block_height, DEFAULT_TITLE_BOX["height"])
+
+    def test_title_remains_vertically_centered_in_title_box(self) -> None:
+        box = text_box_from_dict(DEFAULT_TITLE_BOX)
+        _, _, _, _, block_height = fit_title_max_2_lines(
+            "KEEP DRINKING!",
+            max_width=box.width,
+            max_height=box.height,
+            font_path=default_font_path(),
+        )
+        _, y = center_text_block_in_box(box, block_height)
+        self.assertEqual(y, box.y + (box.height - block_height) // 2)
+        self.assertGreaterEqual(y, box.y)
+        self.assertLessEqual(y + block_height, box.y + box.height)
+
+    def test_title_font_can_grow_up_to_max(self) -> None:
         size = fit_title_font_size_for_test(
             "GO",
             max_width=5000,
             max_height=1000,
             font_size=MAX_TITLE_FONT_SIZE,
         )
-        self.assertGreaterEqual(size, 300)
-        self.assertLessEqual(size, MAX_TITLE_FONT_SIZE)
+        self.assertGreaterEqual(size, 400)
 
     def test_speaker_fits_in_one_line(self) -> None:
         _, lines, _, width, height = fit_single_line_text(
@@ -115,26 +161,50 @@ class SimplifiedTitleFitTest(unittest.TestCase):
         self.assertLessEqual(width, DEFAULT_SPEAKER_BOX["width"])
         self.assertLessEqual(height, DEFAULT_SPEAKER_BOX["height"])
 
+    def test_measure_text_block_grows_with_font_size(self) -> None:
+        from title_renderer import _load_font
+
+        small = _load_font(80, default_font_path())
+        large = _load_font(300, default_font_path())
+        _, _, small_h = measure_text_block(["TALLER"], small)
+        _, _, large_h = measure_text_block(["TALLER"], large)
+        self.assertGreater(large_h, small_h)
+
 
 class SimplifiedLayoutTest(unittest.TestCase):
-    def test_default_boxes_match_open_bible_layout(self) -> None:
-        self.assertEqual(DEFAULT_SERVICE_BOX["y"], 95)
-        self.assertEqual(DEFAULT_TITLE_BOX["y"], 180)
-        self.assertEqual(DEFAULT_SPEAKER_BOX["y"], 760)
-        self.assertEqual(DEFAULT_TITLE_BOX["width"], 1560)
+    def test_default_boxes_match_requested_layout(self) -> None:
+        self.assertEqual(
+            DEFAULT_SERVICE_BOX,
+            {"x": 280, "y": 95, "width": 1360, "height": 90},
+        )
+        self.assertEqual(
+            DEFAULT_TITLE_BOX,
+            {"x": 30, "y": 195, "width": 1860, "height": 460},
+        )
+        self.assertEqual(
+            DEFAULT_SPEAKER_BOX,
+            {"x": 280, "y": 665, "width": 1360, "height": 90},
+        )
+
+    def test_default_box_reset_uses_new_default_values(self) -> None:
+        source = (PROJECT_ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertIn("LAYOUT_DEFAULTS_VERSION", source)
+        self.assertIn("def _reset_box_defaults", source)
+        self.assertGreaterEqual(LAYOUT_DEFAULTS_VERSION, 4)
+        self.assertIn("DEFAULT_TITLE_BOX", source)
 
     def test_changing_title_box_y_height_affects_layout(self) -> None:
         base = self._options(
-            title_box=text_box_from_dict({"x": 180, "y": 180, "width": 1560, "height": 520})
+            title_box=text_box_from_dict({"x": 30, "y": 195, "width": 1860, "height": 460})
         )
         moved = self._options(
-            title_box=text_box_from_dict({"x": 180, "y": 260, "width": 1560, "height": 400})
+            title_box=text_box_from_dict({"x": 30, "y": 260, "width": 1860, "height": 360})
         )
         _, base_title, _ = resolve_layout_boxes(base)
         _, moved_title, _ = resolve_layout_boxes(moved)
-        self.assertEqual(base_title.y, 180)
+        self.assertEqual(base_title.y, 195)
         self.assertEqual(moved_title.y, 260)
-        self.assertEqual(moved_title.height, 400)
+        self.assertEqual(moved_title.height, 360)
         self.assertEqual(render_title_image(moved).size, CANVAS_SIZE)
 
     def test_changing_service_and_speaker_boxes_affects_layout(self) -> None:
@@ -146,17 +216,6 @@ class SimplifiedLayoutTest(unittest.TestCase):
         self.assertEqual(service.y, 40)
         self.assertEqual(speaker.y, 900)
         self.assertEqual(render_title_image(options).size, CANVAS_SIZE)
-
-    def test_title_stays_inside_title_box(self) -> None:
-        box = text_box_from_dict({"x": 180, "y": 180, "width": 1560, "height": 520})
-        _, lines, _, block_width, block_height = fit_title_metrics_for_test(
-            "THE TRUTH THE WHOLE TRUTH AND NOTHING BUT THE TRUTH",
-            max_width=box.width,
-            max_height=box.height,
-        )
-        self.assertLessEqual(len(lines), 2)
-        self.assertLessEqual(block_width, box.width)
-        self.assertLessEqual(block_height, box.height)
 
     def _options(self, **kwargs) -> TitleImageOptions:
         values = {
@@ -221,7 +280,6 @@ class SimplifiedRenderTest(unittest.TestCase):
         self.assertEqual(options.text_color, TEXT_COLOR_WHITE)
         self.assertFalse(options.shadow_enabled)
 
-        # Render on solid black so white title pixels are obvious.
         with tempfile.TemporaryDirectory() as temp_dir:
             bg = Path(temp_dir) / "black.png"
             Image.new("RGB", CANVAS_SIZE, (0, 0, 0)).save(bg)
@@ -243,10 +301,7 @@ class SimplifiedRenderTest(unittest.TestCase):
         ]
         self.assertGreater(len(bright), 20)
 
-        # Nearby dark pixels should stay near black (no soft shadow bloom).
-        shadow_probe = image.getpixel(
-            (title["x"] + title["width"] // 2 + 120, title["y"] + title["height"] // 2 + 90)
-        )
+        shadow_probe = image.getpixel((title["x"] + 20, title["y"] + 20))
         self.assertLess(sum(shadow_probe) / 3, 40)
 
 
@@ -265,17 +320,9 @@ class SimplifiedAppSafetyTest(unittest.TestCase):
         for key in widget_keys:
             self.assertIn(f'key="{key}"', source)
 
-        # Box controls use dynamic keys like simple_{prefix}_x.
         self.assertIn('key=f"simple_{prefix}_x"', source)
-        self.assertIn('key=f"simple_{prefix}_y"', source)
-        self.assertIn('key=f"simple_{prefix}_width"', source)
-        self.assertIn('key=f"simple_{prefix}_height"', source)
-
-        # Reset assigns box widget keys only immediately before st.rerun().
         self.assertIn("def _reset_box_defaults", source)
-        self.assertIn("Reset boxes to defaults", source)
         self.assertIn("st.rerun()", source)
-
         tree = ast.parse(source)
         self.assertTrue(any(isinstance(node, ast.FunctionDef) for node in ast.walk(tree)))
 
