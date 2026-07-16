@@ -21,20 +21,25 @@ BEBAS_FONT = FONTS_DIR / "BebasNeue-Regular.ttf"
 FONT_EXTENSIONS = {".ttf", ".otf"}
 
 MAX_TITLE_FONT_SIZE = 400
-MIN_TITLE_FONT_SIZE = 40
-SERVICE_FONT_SIZE = 86
-SPEAKER_FONT_SIZE = 80
-TITLE_SIDE_PADDING = 120
+MIN_TITLE_FONT_SIZE = 28
+MIN_SINGLE_LINE_FONT_SIZE = 28
+TITLE_LINE_SPACING = 0.92
+TEXT_COLOR_WHITE = "#FFFFFF"
+
+# Default boxes tuned for the open-Bible template (1920x1080).
+DEFAULT_SERVICE_BOX = {"x": 280, "y": 95, "width": 1360, "height": 90}
+DEFAULT_TITLE_BOX = {"x": 180, "y": 180, "width": 1560, "height": 520}
+DEFAULT_SPEAKER_BOX = {"x": 280, "y": 760, "width": 1360, "height": 90}
+
+# Compatibility aliases for unused legacy modules.
+SERVICE_BOX = dict(DEFAULT_SERVICE_BOX)
+SPEAKER_BOX = dict(DEFAULT_SPEAKER_BOX)
+TITLE_SIDE_PADDING = DEFAULT_TITLE_BOX["x"]
 TITLE_VERTICAL_GAP = 35
 MIN_TITLE_HEIGHT = 80
-
-SERVICE_BOX = {"x": 120, "y": 130, "width": 1680, "height": 110}
-SPEAKER_BOX = {"x": 120, "y": 740, "width": 1680, "height": 120}
-
-# Compatibility aliases for unused legacy modules (not used by the simplified app).
-DEFAULT_TOP_POSITION = (960, SERVICE_BOX["y"])
-DEFAULT_TITLE_POSITION = (960, 470)
-DEFAULT_BOTTOM_POSITION = (960, SPEAKER_BOX["y"])
+DEFAULT_TOP_POSITION = (960, DEFAULT_SERVICE_BOX["y"])
+DEFAULT_TITLE_POSITION = (960, 440)
+DEFAULT_BOTTOM_POSITION = (960, DEFAULT_SPEAKER_BOX["y"])
 
 
 @dataclass(frozen=True)
@@ -47,7 +52,7 @@ class TextBox:
     auto_size: bool = True
     font_size: int = 86
     max_font_size: int = MAX_TITLE_FONT_SIZE
-    line_spacing: float = 0.9
+    line_spacing: float = TITLE_LINE_SPACING
     skew_angle: float = 0.0
 
 
@@ -60,18 +65,17 @@ class TitleImageOptions:
     service_date: date
     sermon_title: str
     speaker_name: str
-    text_color: str = "#FFFFFF"
+    text_color: str = TEXT_COLOR_WHITE
     background_path: Path | None = None
     show_bounding_boxes: bool = False
-    title_vertical_offset: int = 0
-    # Kept for older call sites / tests; ignored by the simplified renderer.
+    title_vertical_offset: int = 0  # unused; kept for older call sites
     font_path: Path | None = None
     service_font_path: Path | None = None
     title_font_path: Path | None = None
     speaker_font_path: Path | None = None
     auto_size: bool = True
     title_font_size: int = MAX_TITLE_FONT_SIZE
-    shadow_enabled: bool = True
+    shadow_enabled: bool = False
     show_service_line: bool = True
     skew_enabled: bool = False
     show_layout_guides: bool = False
@@ -79,9 +83,9 @@ class TitleImageOptions:
     service_line_box: TextBox | None = None
     title_box: TextBox | None = None
     speaker_box: TextBox | None = None
-    top_line_position: tuple[int, int] = (960, 130)
-    title_position: tuple[int, int] = (960, 470)
-    bottom_line_position: tuple[int, int] = (960, 740)
+    top_line_position: tuple[int, int] = (960, 95)
+    title_position: tuple[int, int] = (960, 440)
+    bottom_line_position: tuple[int, int] = (960, 760)
     text_alignment: str = "center"
 
 
@@ -117,8 +121,7 @@ def service_code(service: str) -> str:
 
 def format_title(value: str) -> str:
     lines = [" ".join(line.strip().upper().split()) for line in value.splitlines()]
-    cleaned = "\n".join(line for line in lines if line)
-    return cleaned
+    return "\n".join(line for line in lines if line)
 
 
 def format_speaker(value: str) -> str:
@@ -156,25 +159,49 @@ def list_template_backgrounds() -> list[Path]:
     )
 
 
+def default_service_box() -> TextBox:
+    return TextBox(**DEFAULT_SERVICE_BOX)
+
+
+def default_title_box() -> TextBox:
+    return TextBox(
+        **DEFAULT_TITLE_BOX,
+        max_font_size=MAX_TITLE_FONT_SIZE,
+        line_spacing=TITLE_LINE_SPACING,
+    )
+
+
+def default_speaker_box() -> TextBox:
+    return TextBox(**DEFAULT_SPEAKER_BOX)
+
+
+def box_dict(box: TextBox) -> dict[str, int]:
+    return {"x": box.x, "y": box.y, "width": box.width, "height": box.height}
+
+
+def text_box_from_dict(values: dict[str, int], *, max_font_size: int = MAX_TITLE_FONT_SIZE) -> TextBox:
+    return TextBox(
+        x=int(values["x"]),
+        y=int(values["y"]),
+        width=max(1, int(values["width"])),
+        height=max(1, int(values["height"])),
+        max_font_size=max_font_size,
+        line_spacing=TITLE_LINE_SPACING,
+    )
+
+
+def resolve_layout_boxes(options: TitleImageOptions) -> tuple[TextBox, TextBox, TextBox]:
+    service_box = options.service_line_box or default_service_box()
+    title_box = options.title_box or default_title_box()
+    speaker_box = options.speaker_box or default_speaker_box()
+    return service_box, title_box, speaker_box
+
+
 def compute_title_box(title_vertical_offset: int = 0) -> dict[str, int]:
-    service_bottom = SERVICE_BOX["y"] + SERVICE_BOX["height"]
-    speaker_top = SPEAKER_BOX["y"]
-    available = speaker_top - service_bottom
-    height = max(MIN_TITLE_HEIGHT, available - (2 * TITLE_VERTICAL_GAP))
-    y = service_bottom + TITLE_VERTICAL_GAP + int(title_vertical_offset)
-    # Keep the title box inside the service/speaker gap as much as practical.
-    min_y = service_bottom + 10
-    max_y = speaker_top - height - 10
-    if max_y < min_y:
-        y = service_bottom + max(0, (available - height) // 2)
-    else:
-        y = max(min_y, min(max_y, y))
-    return {
-        "x": TITLE_SIDE_PADDING,
-        "y": y,
-        "width": CANVAS_WIDTH - (2 * TITLE_SIDE_PADDING),
-        "height": height,
-    }
+    """Legacy helper kept for older tests; returns the default title box with optional y nudge."""
+    box = dict(DEFAULT_TITLE_BOX)
+    box["y"] = max(0, box["y"] + int(title_vertical_offset))
+    return box
 
 
 def render_title_image(options: TitleImageOptions) -> Image.Image:
@@ -182,59 +209,44 @@ def render_title_image(options: TitleImageOptions) -> Image.Image:
     image = _load_background(options.background_path)
     draw = ImageDraw.Draw(image)
     font_path = default_font_path()
-
-    service_box = TextBox(**SERVICE_BOX, alignment="center", auto_size=True, font_size=SERVICE_FONT_SIZE)
-    speaker_box = TextBox(**SPEAKER_BOX, alignment="center", auto_size=True, font_size=SPEAKER_FONT_SIZE)
-    title_metrics = compute_title_box(options.title_vertical_offset)
-    title_box = TextBox(
-        x=title_metrics["x"],
-        y=title_metrics["y"],
-        width=title_metrics["width"],
-        height=title_metrics["height"],
-        alignment="center",
-        auto_size=True,
-        font_size=MAX_TITLE_FONT_SIZE,
-        max_font_size=MAX_TITLE_FONT_SIZE,
-        line_spacing=0.9,
-    )
-
-    top_line = format_top_line(options)
-    title = format_title(options.sermon_title)
-    speaker = format_speaker(options.speaker_name)
+    service_box, title_box, speaker_box = resolve_layout_boxes(options)
+    fill = options.text_color or TEXT_COLOR_WHITE
+    # Simplified app always renders white text with no shadow.
+    shadow_enabled = False
 
     if options.show_service_line:
-        _draw_fixed_text(
+        render_text_in_box(
             draw,
-            top_line,
+            format_top_line(options),
             font_path,
-            options.text_color,
+            fill,
             service_box,
-            options.shadow_enabled,
-            preferred_size=SERVICE_FONT_SIZE,
+            mode="single",
+            shadow_enabled=shadow_enabled,
         )
 
-    _draw_main_title(
+    render_text_in_box(
         draw,
-        title,
-        options.text_color,
+        format_title(options.sermon_title),
         font_path,
+        fill,
         title_box,
-        options.shadow_enabled,
+        mode="title",
+        shadow_enabled=shadow_enabled,
     )
 
-    _draw_fixed_text(
+    render_text_in_box(
         draw,
-        speaker,
+        format_speaker(options.speaker_name),
         font_path,
-        options.text_color,
+        fill,
         speaker_box,
-        options.shadow_enabled,
-        preferred_size=SPEAKER_FONT_SIZE,
+        mode="single",
+        shadow_enabled=shadow_enabled,
     )
 
-    show_boxes = options.show_bounding_boxes or options.show_layout_guides
-    if show_boxes:
-        _draw_bounding_boxes(draw, service_box, title_box, speaker_box)
+    if options.show_bounding_boxes or options.show_layout_guides:
+        draw_preview_guides(draw, service_box, title_box, speaker_box)
 
     return image
 
@@ -247,14 +259,81 @@ def save_title_image(options: TitleImageOptions) -> Path:
     return output_path
 
 
-def fit_title_two_lines(
+def render_text_in_box(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font_path: Path | None,
+    fill: str,
+    box: TextBox,
+    *,
+    mode: str,
+    shadow_enabled: bool = False,
+) -> None:
+    if not text:
+        return
+    if mode == "title":
+        font, lines, line_height, _, block_height = fit_title_one_or_two_lines(
+            text,
+            max_width=box.width,
+            max_height=box.height,
+            font_path=font_path,
+            max_font_size=box.max_font_size,
+            line_spacing=box.line_spacing,
+        )
+    else:
+        font, lines, line_height, _, block_height = fit_single_line_text(
+            text,
+            max_width=box.width,
+            max_height=box.height,
+            font_path=font_path,
+        )
+
+    y = box.y + max(0, (box.height - block_height) // 2)
+    for line in lines:
+        line_width = _text_width(draw, line, font)
+        x = box.x + max(0, (box.width - line_width) // 2)
+        if shadow_enabled:
+            _draw_text_shadow(draw, (x, y), line, font)
+        draw.text((x, y), line, font=font, fill=fill)
+        y += line_height
+
+
+def fit_single_line_text(
+    text: str,
+    max_width: int,
+    max_height: int,
+    font_path: Path | None = None,
+    max_font_size: int = 120,
+    min_font_size: int = MIN_SINGLE_LINE_FONT_SIZE,
+) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
+    cleaned = " ".join(text.strip().upper().split())
+    probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    if not cleaned:
+        font = _load_font(max_font_size, font_path)
+        return font, [], max(1, max_font_size), 0, 0
+
+    start = max(min_font_size, min(int(max_font_size), max(1, max_height)))
+    for size in range(start, min_font_size - 1, -1):
+        font = _load_font(size, font_path)
+        width = _text_width(probe, cleaned, font)
+        height = max(1, size)
+        if width <= max_width and height <= max_height:
+            return font, [cleaned], height, width, height
+
+    font = _load_font(min_font_size, font_path)
+    width = _text_width(probe, cleaned, font)
+    height = max(1, min_font_size)
+    return font, [cleaned], height, width, height
+
+
+def fit_title_one_or_two_lines(
     title: str,
     max_width: int,
     max_height: int,
     font_path: Path | None = None,
     max_font_size: int = MAX_TITLE_FONT_SIZE,
     min_font_size: int = MIN_TITLE_FONT_SIZE,
-    line_spacing: float = 0.9,
+    line_spacing: float = TITLE_LINE_SPACING,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
     """Fit title to at most 2 lines, preferring 1 line when possible."""
     probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
@@ -283,13 +362,45 @@ def fit_title_two_lines(
     return font, lines, line_height, block_width, block_height
 
 
+# Backward-compatible alias used by older tests.
+fit_title_two_lines = fit_title_one_or_two_lines
+
+
+def choose_best_two_line_wrap(
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    max_width: int,
+    draw: ImageDraw.ImageDraw | None = None,
+) -> list[str]:
+    probe = draw or ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    return _best_two_line_wrap(text, font, max_width, probe)
+
+
+def draw_preview_guides(
+    draw: ImageDraw.ImageDraw,
+    service_box: TextBox,
+    title_box: TextBox,
+    speaker_box: TextBox,
+) -> None:
+    for box, color in (
+        (service_box, (255, 255, 255, 160)),
+        (title_box, (255, 220, 80, 190)),
+        (speaker_box, (255, 255, 255, 160)),
+    ):
+        draw.rectangle(
+            (box.x, box.y, box.x + box.width, box.y + box.height),
+            outline=color,
+            width=4,
+        )
+
+
 def fit_title_metrics_for_test(
     title: str,
-    max_width: int = 1680,
-    max_height: int = 440,
+    max_width: int = 1560,
+    max_height: int = 520,
     font_size: int = MAX_TITLE_FONT_SIZE,
     auto_size: bool = True,
-    line_spacing: float = 0.9,
+    line_spacing: float = TITLE_LINE_SPACING,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
     if not auto_size:
         font = _load_font(font_size, default_font_path())
@@ -298,7 +409,7 @@ def fit_title_metrics_for_test(
         line_height = max(1, round(font_size * line_spacing))
         block_width = max((_text_width(probe, line, font) for line in lines), default=0)
         return font, lines, line_height, block_width, line_height * len(lines)
-    return fit_title_two_lines(
+    return fit_title_one_or_two_lines(
         title,
         max_width=max_width,
         max_height=max_height,
@@ -310,7 +421,7 @@ def fit_title_metrics_for_test(
 
 def fit_title_lines_for_test(
     title: str,
-    max_width: int = 1680,
+    max_width: int = 1560,
     font_size: int = 218,
     font_path: Path | None = None,
 ) -> list[str]:
@@ -321,8 +432,8 @@ def fit_title_lines_for_test(
 
 def fit_title_font_size_for_test(
     title: str,
-    max_width: int = 1680,
-    max_height: int = 440,
+    max_width: int = 1560,
+    max_height: int = 520,
     font_size: int = MAX_TITLE_FONT_SIZE,
 ) -> int:
     font, _, _, _, _ = fit_title_metrics_for_test(
@@ -339,7 +450,6 @@ def _choose_title_lines(
 ) -> list[str]:
     manual = [line for line in title.splitlines() if line.strip()]
     if len(manual) >= 2:
-        # Preserve up to two manual lines; merge extras into line 2.
         first = manual[0]
         second = " ".join(manual[1:])
         return [first, second] if second else [first]
@@ -347,7 +457,7 @@ def _choose_title_lines(
     text = manual[0] if manual else title
     if _text_width(draw, text, font) <= max_width:
         return [text]
-    return _best_two_line_wrap(text, font, max_width, draw)
+    return choose_best_two_line_wrap(text, font, max_width, draw)
 
 
 def _best_two_line_wrap(
@@ -369,10 +479,10 @@ def _best_two_line_wrap(
         w2 = _text_width(draw, line2, font)
         if w1 > max_width or w2 > max_width:
             continue
-        # Prefer balanced widths; penalize a one-word second line when avoidable.
         balance = abs(w1 - w2)
         orphan = 2.0 if len(words[split:]) == 1 and len(words) > 2 else 0.0
-        score = (-max(w1, w2), -orphan, -balance)
+        # Prefer fills that use more width, then avoid orphans, then balance.
+        score = (min(w1, w2), -orphan, -balance)
         if best_score is None or score > best_score:
             best = [line1, line2]
             best_score = score
@@ -380,94 +490,20 @@ def _best_two_line_wrap(
     if best:
         return best
 
-    # Fallback greedy wrap capped at 2 lines.
     lines: list[str] = []
     current = ""
-    for word in words:
+    for index, word in enumerate(words):
         candidate = f"{current} {word}".strip()
         if not current or _text_width(draw, candidate, font) <= max_width:
             current = candidate
             continue
         lines.append(current)
-        current = word
-        if len(lines) == 1:
-            # Remaining words go on line 2.
-            rest = [current] + words[words.index(word) + 1 :]
-            lines.append(" ".join(rest))
-            return lines
+        rest = words[index:]
+        lines.append(" ".join(rest))
+        return lines[:2]
     if current:
         lines.append(current)
     return lines[:2]
-
-
-def _draw_main_title(
-    draw: ImageDraw.ImageDraw,
-    title: str,
-    fill: str,
-    font_path: Path | None,
-    box: TextBox,
-    shadow_enabled: bool,
-) -> None:
-    if not title:
-        return
-    font, lines, line_height, _, block_height = fit_title_two_lines(
-        title,
-        max_width=box.width,
-        max_height=box.height,
-        font_path=font_path,
-        max_font_size=box.max_font_size,
-        line_spacing=box.line_spacing,
-    )
-    y = box.y + (box.height - block_height) // 2
-    for line in lines:
-        line_width = _text_width(draw, line, font)
-        x = box.x + (box.width - line_width) // 2
-        if shadow_enabled:
-            _draw_text_shadow(draw, (x, y), line, font)
-        draw.text((x, y), line, font=font, fill=fill)
-        y += line_height
-
-
-def _draw_fixed_text(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    font_path: Path | None,
-    fill: str,
-    box: TextBox,
-    shadow_enabled: bool,
-    preferred_size: int,
-) -> None:
-    if not text:
-        return
-    size = preferred_size
-    font = _load_font(size, font_path)
-    while size > 28 and _text_width(draw, text, font) > box.width:
-        size -= 2
-        font = _load_font(size, font_path)
-    line_height = max(1, round(size * 1.0))
-    x = box.x + (box.width - _text_width(draw, text, font)) // 2
-    y = box.y + (box.height - line_height) // 2
-    if shadow_enabled:
-        _draw_text_shadow(draw, (x, y), text, font)
-    draw.text((x, y), text, font=font, fill=fill)
-
-
-def _draw_bounding_boxes(
-    draw: ImageDraw.ImageDraw,
-    service_box: TextBox,
-    title_box: TextBox,
-    speaker_box: TextBox,
-) -> None:
-    for box, color in (
-        (service_box, (255, 255, 255, 140)),
-        (title_box, (255, 220, 80, 180)),
-        (speaker_box, (255, 255, 255, 140)),
-    ):
-        draw.rectangle(
-            (box.x, box.y, box.x + box.width, box.y + box.height),
-            outline=color,
-            width=4,
-        )
 
 
 def _slug(value: str) -> str:
@@ -565,6 +601,7 @@ def _draw_text_shadow(
     radius: int = 3,
     offset: tuple[int, int] = (5, 5),
 ) -> None:
+    # Kept only for optional/debug use; simplified app never enables shadow.
     x, y = xy
     for dx in range(-radius, radius + 1, radius):
         for dy in range(-radius, radius + 1, radius):

@@ -10,16 +10,20 @@ import streamlit as st
 from monark_schedule import find_current_service_entry, get_monark_service_entries
 from title_renderer import (
     BARLOW_BOLD_ITALIC,
+    CANVAS_HEIGHT,
+    CANVAS_WIDTH,
+    DEFAULT_SERVICE_BOX,
+    DEFAULT_SPEAKER_BOX,
+    DEFAULT_TITLE_BOX,
     EXPORTS_DIR,
-    TITLE_VERTICAL_GAP,
     TitleImageOptions,
-    compute_title_box,
     default_font_path,
     ensure_project_dirs,
     export_filename,
     list_template_backgrounds,
     render_title_image,
     service_code,
+    text_box_from_dict,
 )
 
 
@@ -35,9 +39,12 @@ DAYS = [
 SERVICES = ["Morning", "Afternoon", "Evening"]
 SERVICE_LABELS = {"Morning": "AM", "Afternoon": "AFT", "Evening": "PM"}
 GENERATED_BACKGROUND = "Generated blue/gray background"
-OFFSET_STEP = 10
-OFFSET_MIN = -150
-OFFSET_MAX = 150
+
+BOX_DEFAULTS = {
+    "service": DEFAULT_SERVICE_BOX,
+    "title": DEFAULT_TITLE_BOX,
+    "speaker": DEFAULT_SPEAKER_BOX,
+}
 
 
 def main() -> None:
@@ -92,7 +99,7 @@ def main() -> None:
         st.subheader("Title")
         sermon_title = st.text_area(
             "Sermon title",
-            height=140,
+            height=120,
             key="simple_title_input",
             placeholder="Type title here...",
         )
@@ -112,28 +119,17 @@ def main() -> None:
         show_boxes = st.checkbox(
             "Show bounding boxes",
             key="simple_show_boxes",
+            help="Preview guides only. Normal export stays clean.",
         )
 
-        st.subheader("Title position")
-        offset = int(st.session_state.simple_title_offset)
-        move_cols = st.columns(3)
-        if move_cols[0].button("Move Title Up", width="stretch"):
-            st.session_state.simple_title_offset = max(OFFSET_MIN, offset - OFFSET_STEP)
-            st.rerun()
-        if move_cols[1].button("Move Title Down", width="stretch"):
-            st.session_state.simple_title_offset = min(OFFSET_MAX, offset + OFFSET_STEP)
-            st.rerun()
-        if move_cols[2].button("Reset Title Position", width="stretch"):
-            st.session_state.simple_title_offset = 0
+        st.subheader("Bounding boxes")
+        if st.button("Reset boxes to defaults", width="stretch"):
+            _reset_box_defaults()
             st.rerun()
 
-        st.slider(
-            "Title vertical offset",
-            min_value=OFFSET_MIN,
-            max_value=OFFSET_MAX,
-            key="simple_title_offset",
-            help="Moves the title box up (-) or down (+) between the service and speaker lines.",
-        )
+        _box_controls("Service Line Box", "service", "Service")
+        _box_controls("Sermon Title Box", "title", "Title")
+        _box_controls("Speaker / Minister Box", "speaker", "Speaker")
 
         options = _build_options(
             day=day,
@@ -145,7 +141,6 @@ def main() -> None:
             background_labels=background_labels,
             templates=templates,
             show_boxes=show_boxes,
-            title_offset=int(st.session_state.simple_title_offset),
         )
 
         export_options = replace(options, show_bounding_boxes=False)
@@ -161,7 +156,7 @@ def main() -> None:
         font_path = default_font_path()
         st.caption(
             f"Font: {font_path.name if font_path else 'system fallback'} · "
-            f"Export size: 1920×1080 · Title gap: {TITLE_VERTICAL_GAP}px"
+            "White text · No shadow · Export 1920×1080"
         )
 
     with right:
@@ -175,11 +170,45 @@ def main() -> None:
             mime="image/png",
             width="stretch",
         )
-        title_box = compute_title_box(int(st.session_state.simple_title_offset))
         st.caption(
             f"Service: {options.day.upper()} {service_code(options.service)} · "
-            f"Title box y={title_box['y']} h={title_box['height']}"
+            f"Title box y={options.title_box.y if options.title_box else DEFAULT_TITLE_BOX['y']} "
+            f"h={options.title_box.height if options.title_box else DEFAULT_TITLE_BOX['height']}"
         )
+
+
+def _box_controls(heading: str, prefix: str, label: str) -> None:
+    st.markdown(f"**{heading}**")
+    row1 = st.columns(2)
+    row2 = st.columns(2)
+    row1[0].number_input(
+        f"{label} X",
+        min_value=0,
+        max_value=CANVAS_WIDTH,
+        step=5,
+        key=f"simple_{prefix}_x",
+    )
+    row1[1].number_input(
+        f"{label} Y",
+        min_value=0,
+        max_value=CANVAS_HEIGHT,
+        step=5,
+        key=f"simple_{prefix}_y",
+    )
+    row2[0].number_input(
+        f"{label} Width",
+        min_value=40,
+        max_value=CANVAS_WIDTH,
+        step=10,
+        key=f"simple_{prefix}_width",
+    )
+    row2[1].number_input(
+        f"{label} Height",
+        min_value=20,
+        max_value=CANVAS_HEIGHT,
+        step=5,
+        key=f"simple_{prefix}_height",
+    )
 
 
 def _ensure_simple_defaults() -> None:
@@ -189,15 +218,34 @@ def _ensure_simple_defaults() -> None:
     st.session_state.setdefault("simple_service_select", "Evening")
     st.session_state.setdefault("simple_title_input", "")
     st.session_state.setdefault("simple_speaker_input", "")
-    # Background default is set in main() once templates are known.
     st.session_state.setdefault("simple_show_boxes", False)
-    st.session_state.setdefault("simple_title_offset", 0)
     st.session_state.setdefault("simple_last_export", "")
-    # Preferred font path exists for diagnostics only.
     st.session_state.setdefault(
         "simple_font_path",
         str(BARLOW_BOLD_ITALIC if BARLOW_BOLD_ITALIC.exists() else ""),
     )
+    for prefix, defaults in BOX_DEFAULTS.items():
+        st.session_state.setdefault(f"simple_{prefix}_x", defaults["x"])
+        st.session_state.setdefault(f"simple_{prefix}_y", defaults["y"])
+        st.session_state.setdefault(f"simple_{prefix}_width", defaults["width"])
+        st.session_state.setdefault(f"simple_{prefix}_height", defaults["height"])
+
+
+def _reset_box_defaults() -> None:
+    for prefix, defaults in BOX_DEFAULTS.items():
+        st.session_state[f"simple_{prefix}_x"] = defaults["x"]
+        st.session_state[f"simple_{prefix}_y"] = defaults["y"]
+        st.session_state[f"simple_{prefix}_width"] = defaults["width"]
+        st.session_state[f"simple_{prefix}_height"] = defaults["height"]
+
+
+def _read_box(prefix: str) -> dict[str, int]:
+    return {
+        "x": int(st.session_state[f"simple_{prefix}_x"]),
+        "y": int(st.session_state[f"simple_{prefix}_y"]),
+        "width": int(st.session_state[f"simple_{prefix}_width"]),
+        "height": int(st.session_state[f"simple_{prefix}_height"]),
+    }
 
 
 def _build_options(
@@ -211,7 +259,6 @@ def _build_options(
     background_labels: list[str],
     templates: list[Path],
     show_boxes: bool,
-    title_offset: int,
 ) -> TitleImageOptions:
     background_path = None
     if background_label != GENERATED_BACKGROUND and background_label in background_labels:
@@ -227,7 +274,11 @@ def _build_options(
         speaker_name=speaker,
         background_path=background_path,
         show_bounding_boxes=show_boxes,
-        title_vertical_offset=title_offset,
+        shadow_enabled=False,
+        text_color="#FFFFFF",
+        service_line_box=text_box_from_dict(_read_box("service")),
+        title_box=text_box_from_dict(_read_box("title")),
+        speaker_box=text_box_from_dict(_read_box("speaker")),
     )
 
 
