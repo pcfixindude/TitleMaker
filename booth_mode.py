@@ -10,6 +10,11 @@ NO_SCHEDULE_MESSAGE = "Generate a Monark schedule first to use Booth Mode."
 MAX_LABEL_DETAIL_LENGTH = 64
 
 
+def advanced_sections_default_collapsed() -> bool:
+    """Advanced expanders should start collapsed for booth simplicity."""
+    return True
+
+
 def build_booth_service_label(entry: dict[str, Any]) -> str:
     title = str(entry.get("title") or "").strip()
     speaker = str(entry.get("speaker") or "").strip()

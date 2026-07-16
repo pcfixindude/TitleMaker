@@ -17,7 +17,12 @@ from title_renderer import (
     PRESETS_DIR,
     ensure_project_dirs,
 )
-from layout_controls import MAX_TITLE_FONT_SIZE, clamp_skew_angle
+from layout_controls import (
+    MAX_TITLE_FONT_SIZE,
+    DEFAULT_TITLE_BOTTOM_PADDING,
+    DEFAULT_TITLE_TOP_PADDING,
+    clamp_skew_angle,
+)
 
 
 GENERATED_BACKGROUND_LABEL = "Generated blue/gray background"
@@ -84,6 +89,9 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "show_layout_guides": False,
         "selected_layout_area": "Sermon Title",
         "skew_enabled": True,
+        "auto_title_area": True,
+        "title_top_padding": DEFAULT_TITLE_TOP_PADDING,
+        "title_bottom_padding": DEFAULT_TITLE_BOTTOM_PADDING,
         **migrate_export_settings({}),
     },
     {
@@ -110,6 +118,9 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "show_layout_guides": False,
         "selected_layout_area": "Sermon Title",
         "skew_enabled": False,
+        "auto_title_area": True,
+        "title_top_padding": DEFAULT_TITLE_TOP_PADDING,
+        "title_bottom_padding": DEFAULT_TITLE_BOTTOM_PADDING,
         **migrate_export_settings({}),
     },
     {
@@ -136,6 +147,9 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "show_layout_guides": False,
         "selected_layout_area": "Sermon Title",
         "skew_enabled": True,
+        "auto_title_area": True,
+        "title_top_padding": DEFAULT_TITLE_TOP_PADDING,
+        "title_bottom_padding": DEFAULT_TITLE_BOTTOM_PADDING,
         **migrate_export_settings({}),
     },
 ]
@@ -177,6 +191,56 @@ def save_preset(name: str, settings: dict[str, Any]) -> Path:
     path = PRESETS_DIR / f"{_slug(preset['name'])}.json"
     _write_json(path, preset)
     return path
+
+
+def builtin_preset_names() -> set[str]:
+    return {preset["name"] for preset in BUILT_IN_PRESETS}
+
+
+def is_builtin_preset(name: str) -> bool:
+    return name in builtin_preset_names()
+
+
+def default_preset_name() -> str:
+    return BUILT_IN_PRESETS[0]["name"]
+
+
+def preset_path_for_name(name: str) -> Path:
+    return PRESETS_DIR / f"{_slug(name)}.json"
+
+
+def delete_preset(name: str, *, allow_builtin: bool = False) -> dict[str, Any]:
+    """Delete a user preset JSON file. Built-ins require allow_builtin=True."""
+    ensure_project_dirs()
+    cleaned = str(name or "").strip()
+    if not cleaned:
+        return {"deleted": False, "reason": "empty_name", "fallback_name": default_preset_name()}
+
+    if is_builtin_preset(cleaned) and not allow_builtin:
+        return {
+            "deleted": False,
+            "reason": "builtin_protected",
+            "name": cleaned,
+            "fallback_name": default_preset_name(),
+        }
+
+    path = preset_path_for_name(cleaned)
+    if not path.exists():
+        return {
+            "deleted": False,
+            "reason": "not_found",
+            "name": cleaned,
+            "fallback_name": default_preset_name(),
+        }
+
+    path.unlink()
+    return {
+        "deleted": True,
+        "name": cleaned,
+        "path": str(path),
+        "was_builtin": is_builtin_preset(cleaned),
+        "fallback_name": default_preset_name(),
+    }
 
 
 def normalize_preset(raw: dict[str, Any]) -> dict[str, Any]:
@@ -246,6 +310,13 @@ def normalize_preset(raw: dict[str, Any]) -> dict[str, Any]:
         if raw.get("selected_layout_area") in {"Service Line", "Sermon Title", "Speaker"}
         else "Sermon Title",
         "skew_enabled": bool(raw.get("skew_enabled", True)),
+        "auto_title_area": bool(raw.get("auto_title_area", True)),
+        "title_top_padding": _int_in_range(
+            raw.get("title_top_padding", DEFAULT_TITLE_TOP_PADDING), 0, 400
+        ),
+        "title_bottom_padding": _int_in_range(
+            raw.get("title_bottom_padding", DEFAULT_TITLE_BOTTOM_PADDING), 0, 400
+        ),
         **export_settings,
     }
 

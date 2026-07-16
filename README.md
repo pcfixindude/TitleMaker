@@ -2,282 +2,120 @@
 
 A simple local Streamlit app for creating 1920x1080 Monark Springs camp meeting sermon livestream title images.
 
+## Main Booth Workflow
+
+Booth Mode is the default live screen. For normal services:
+
+1. Generate the Monark schedule (sidebar or empty-state button).
+2. Click **Jump to Current Service**.
+3. Type the sermon title.
+4. Type the speaker / minister.
+5. Preview updates automatically.
+6. Click **Export Current Image** (or **Re-export Current Image** if already exported).
+
+Everything else lives under **Advanced** expanders (collapsed by default).
+
+For best live use, open the app in a browser window and use fullscreen mode.
+
 ## Features
 
-- Live preview in the browser
-- PNG export to `exports/`
-- Uppercases the day, service, title, and speaker automatically
-- Wraps and shrinks long sermon titles to fit
-- Selectable fonts from `fonts/`
-- Separate fonts for service line, sermon title, and minister/speaker text
-- Export targets for stream, YouTube, Facebook, square, vertical, Vimeo/Venmo, and custom sizes
-- Style presets saved as JSON in `presets/`
-- Monark service line format with show/hide toggle
-- Automatic Monark camp meeting schedule and live service log
-- Booth Mode for large live-service controls
-- Visual layout adjustment buttons for text regions
-- Automatic local persistence for service logs and active settings
-- Uses Barlow Condensed ExtraBold Italic as the preferred default when available
-- Uses `fonts/BebasNeue-Regular.ttf` as a fallback when available
-- Falls back to a system font if no custom font is available
-- Generates a soft blue/gray church livestream background when no template is selected
-- Supports custom template images from `templates/`
+- Booth-first live workflow
+- Large preview and export / re-export
+- Previous / Next through all services (including blank rows)
+- Automatic title fitting that uses the space between service and speaker lines
+- Separate fonts per text area (Advanced)
+- Style presets with save / load / delete (Advanced)
+- Export targets including multi-target export (Advanced)
+- Service log, CSV import/export, and batch export (Advanced)
+- Visual layout adjustments and numeric box controls (Advanced)
+- Automatic local persistence for service logs and settings
 
 ## Setup
 
-Install dependencies:
-
 ```bash
 pip install -r requirements.txt
-```
-
-Run the app:
-
-```bash
 streamlit run app.py
 ```
 
-## Fonts
+## Automatic Title Fitting
 
-TitleMaker scans the `fonts/` folder for `.ttf` and `.otf` files and shows them in the font dropdowns.
+The sermon title is the hard part. By default:
 
-For the best match to the sample KEEP DRINKING style, use Barlow Condensed ExtraBold Italic. Place the font file in `fonts/`, for example:
+- **Auto title area between service and speaker** is ON.
+- Service and speaker lines stay centered in their fixed boxes.
+- The title fills the remaining vertical space (with padding).
+- Titles stay centered horizontally and vertically in that area.
+- Short titles render large (up to font size **400**).
+- Longer titles wrap to 2, 3, or more lines and shrink as needed.
+- Manual line breaks (`Enter`) are preserved.
+- Titles do not overflow into the service or speaker lines.
 
-```text
-fonts/BarlowCondensed-ExtraBoldItalic.ttf
-```
+Turn off auto title area under **Advanced: Layout** to set the title box Y/height manually.
 
-If Barlow Condensed ExtraBold Italic is present, TitleMaker selects it by default.
+## Advanced: Service Log / Batch Tools
 
-Bebas Neue is also supported as a fallback. Place it here:
+- Full 30-row service log table
+- CSV import / export
+- Load / archive saved logs
+- Batch export of included or filled rows
 
-```text
-fonts/BebasNeue-Regular.ttf
-```
+## Advanced: Style Presets
 
-If no custom font is present, TitleMaker will safely use the existing Bebas Neue/default fallback behavior and then an available system font.
+- Load a preset
+- Save the current style as a named preset
+- Background, text color, shadow, skew, and service-line visibility
 
-## Separate Fonts Per Text Area
+### Deleting presets
 
-TitleMaker can use different fonts for each text area:
+User-created presets can be deleted under **Advanced: Style Presets**:
 
-- `Service Line Font` controls the date/service line.
-- `Sermon Title Font` controls the main title.
-- `Minister / Speaker Font` controls the bottom speaker line.
+1. Choose the user preset.
+2. Check the confirmation box.
+3. Click **Delete Preset**.
 
-By default, the sermon title and minister/speaker fonts match the Service Line font for backward compatibility. Uncheck `Sermon Title font matches Service Line font` or `Minister / Speaker font matches Service Line font` to choose a different font for that text area.
+Built-in presets (`Monark Blue Gray`, `Plain Black Text`, `Bold Service Title`) are protected and cannot be deleted from the UI. If the active preset is deleted, TitleMaker falls back to **Monark Blue Gray**. Deleting a user preset removes its JSON file from `presets/`.
 
-This is useful for keeping the classic Monark service-line look while experimenting with stronger sermon title emphasis.
+## Advanced: Fonts
+
+Font selection is Advanced-only:
+
+- Service Line Font
+- Sermon Title Font (optional match to service font)
+- Minister / Speaker Font (optional match to service font)
+
+TitleMaker scans `fonts/` for `.ttf` / `.otf` files. Barlow Condensed ExtraBold Italic is preferred when present; Bebas Neue and system fonts are fallbacks.
+
+## Advanced: Layout
+
+- Layout guides
+- Auto title area + padding from service / speaker
+- Visual nudge controls (position, size, font, skew)
+- Numeric X/Y/width/height, alignment, auto-size, line spacing
+
+## Advanced: Export Targets
+
+- Stream / YouTube / Facebook / Vimeo / Custom sizes
+- Export layout mode (scale / fill-crop / stretch)
+- Multi-target export
 
 ## Service Line Format
-
-TitleMaker renders the service line separately from the main sermon title. Use the `Show service line` checkbox in the sidebar to show or hide it.
-
-Format:
 
 ```text
 WEEKDAY SERVICE_CODE M-D-YY
 ```
 
-Service codes:
+Examples: `FRIDAY PM 7-22-22`, `SATURDAY AFT 7-26-26`
 
-- Morning -> AM
-- Afternoon -> AFT
-- Evening -> PM
-
-Examples:
-
-```text
-SATURDAY PM 7-23-22
-FRIDAY PM 7-22-22
-FRIDAY AFT 7-22-22
-```
-
-## Monark Live Workflow
-
-At Monark, the sermon title and preacher are often not known until the service is already underway. The schedule feature is designed as a live service log and quick-entry tool, not mainly as a pre-planning spreadsheet.
-
-The Monark meeting starts on the last Friday of July and runs through the second Sunday, inclusive. TitleMaker generates 10 days of services with Morning, Afternoon, and Evening entries for each day, for 30 total service rows.
-
-Use the sidebar section called `Monark Schedule Generator`:
-
-1. Enter the year.
-2. Click `Generate Monark Schedule`.
-3. Use `Jump to Current Service` during camp to pick the most likely current service based on today's date and time.
-4. In `Current Service`, type the sermon title and preacher as soon as they are known.
-5. Preview updates immediately.
-6. Click `Export Current Service` to save the image and mark that row exported.
-
-The current service selector uses readable service-line options:
-
-```text
-FRIDAY AM 7-22-22
-FRIDAY AFT 7-22-22
-FRIDAY PM 7-22-22
-```
-
-Generated service lines look like:
-
-```text
-FRIDAY AM 7-25-26
-SATURDAY AFT 7-26-26
-SUNDAY PM 7-27-26
-```
-
-## Booth Mode
-
-`Booth Mode` is the big live-use screen for the sound booth. It hides the spreadsheet-heavy workflow and focuses on the current service, title, speaker, preview, and export button.
-
-Recommended live flow:
-
-1. Generate the Monark schedule first.
-2. Open `Booth Mode`.
-3. Click `Jump to Current Service` to select the likely AM, AFT, or PM service based on the current date and time.
-4. Type the sermon title and speaker as soon as they are known.
-5. Watch the preview update immediately.
-6. Click `Export Current Image`.
-7. If a correction is needed, update the title or speaker and click `Re-export Current Image`.
-8. Use `Service Log / Advanced` later for corrections, CSV backup, batch export, and history.
-
-For best live use, open the app in a browser window and use fullscreen mode.
-
-## Service Log
-
-The `Service Log` table shows all 30 generated rows. Titles and speakers start blank. Use it to:
-
-- Correct title or speaker text after the fact
-- Add notes
-- Check rows for later export
-- See which services have already been exported
-- Re-export a row when needed
-- Download or import a CSV log for permanent history
-
-Batch export uses only rows that are checked `Include` or already have a title or speaker. It does not force placeholder titles or speakers.
-
-Exported filenames keep the existing safe structure and include sortable date/day/service components, for example:
-
-```text
-2026-07-24_FRIDAY_AM_SERVICE_TITLE.png
-```
-
-## Saved Data And Backups
-
-TitleMaker automatically saves local working data in `data/`:
+## Saved Data
 
 ```text
 data/service_log.json
 data/settings.json
 ```
 
-`data/service_log.json` stores the active Monark service log, including the year, generated rows, title, speaker, notes, include flag, exported status, and exported timestamp.
-
-`data/settings.json` stores the active preset/style state, including selected preset, font, text color, background, service/title/speaker boxes, font sizes, auto-size settings, alignment, service-line visibility, layout guides, shadow, and skew settings.
-
-When the app starts, it automatically restores these files if they exist. If a saved JSON file is missing or corrupted, TitleMaker shows a friendly warning and continues with safe defaults.
-
-If you generate a schedule for a different year while a saved log is loaded, TitleMaker asks for confirmation before replacing it. Confirmed replacement archives the current log as:
-
-```text
-data/service_log_2026.json
-data/service_log_2027.json
-```
-
-Manual backup controls are available in the sidebar:
-
-- `Save Service Log Now`
-- `Load Service Log`
-- `Export Service Log CSV`
-- `Import Service Log CSV`
-- `Archive Current Log`
-
-For a simple backup, keep a copy of `data/service_log.json` or export the Service Log CSV.
-
-## Template Backgrounds
-
-Add custom background images to `templates/`.
-
-Supported formats:
-
-- `.png`
-- `.jpg`
-- `.jpeg`
-- `.webp`
-
-Template images are resized and center-cropped to 1920x1080.
-
-## Presets
-
-Use the `Preset` dropdown in the sidebar to load common title styles.
-
-Built-in presets:
-
-- Monark Blue Gray
-- Plain Black Text
-- Bold Service Title
-
-Presets are JSON files stored in `presets/`. A preset can include the font choice, auto-size or title font size, text color, background choice, title position, service line position, speaker line position, text alignment, shadow setting, and whether the service line is shown.
-
-To save your own style, adjust the sidebar style settings, enter a name in `Save current settings as preset`, and click `Save Preset`.
-
-Custom presets appear in the dropdown after they are saved.
-
-## Visual Layout Adjustment
-
-Use `Visual Layout Adjustments` in the sidebar while watching the preview.
-
-1. Select `Service Line`, `Sermon Title`, or `Speaker`.
-2. Use the arrow buttons to move the selected text box.
-3. Use `Wider`, `Narrower`, `Taller`, and `Shorter` to resize the region.
-4. Use `A+` and `A-` to adjust font size.
-5. For the sermon title, use `Italic +` and `Italic -` or the numeric `Italic slant angle` control to customize the slant.
-6. Turn on `Show layout guides` while adjusting. The selected region is highlighted more strongly.
-
-Step-size controls let you nudge by small or large amounts for position, size, font size, and skew angle.
-
-Exact numeric editing is still available under `Advanced numeric layout values`, including X, Y, width, height, font size, auto-size, alignment, line spacing, title max font size, and italic slant angle.
-
-The sermon title can now auto-size up to `400` for short titles.
-
-## Export Targets
-
-Use `Export Settings` in the sidebar to choose where the image is going. The normal Monark livestream placeholder should use `Stream 1080p`.
-
-Built-in targets:
-
-- `Stream 1080p`: 1920x1080
-- `YouTube Thumbnail`: 1280x720
-- `YouTube 1080p`: 1920x1080
-- `Facebook Feed Landscape`: 1200x630
-- `Facebook / Instagram Square`: 1080x1080
-- `Facebook / Instagram Story or Reel`: 1080x1920
-- `Vimeo/Venmo 1080p`: 1920x1080
-- `Custom`: user-defined width, height, and suffix
-
-Exported filenames keep the safe date/day/service/title format and add the export target suffix:
-
-```text
-2026-07-24_FRIDAY_AM_IS_GOD_REAL_stream_1080p.png
-2026-07-24_FRIDAY_AM_IS_GOD_REAL_youtube_thumb.png
-2026-07-24_FRIDAY_AM_IS_GOD_REAL_facebook_landscape.png
-```
-
-For custom sizes, set the width, height, and suffix. Example:
-
-```text
-2026-07-24_FRIDAY_AM_IS_GOD_REAL_custom_1600x900.png
-```
-
-`Export layout mode` controls how the 1920x1080 design is adapted:
-
-- `Scale to fit`: preserve the 16:9 layout and fit it inside the target canvas
-- `Fill/crop`: fill the target canvas and crop as needed
-- `Stretch`: scale x and y independently to fill the target
-
-Enable `Export multiple targets` and choose several targets to export the current service image to multiple formats at once.
+Settings include fonts, boxes, auto title area, padding, export targets, and the active preset.
 
 ## Smoke Tests
-
-Run the preset smoke tests:
 
 ```bash
 python3 -B -m unittest discover -s tests
@@ -285,14 +123,6 @@ python3 -B -m unittest discover -s tests
 
 ## Exported Files
 
-Exported images are saved to `exports/` using this format:
-
 ```text
-YYYY-MM-DD_DAY_SERVICE_TITLE.png
-```
-
-Example:
-
-```text
-2026-07-18_FRIDAY_AM_IS_GOD_REAL.png
+exports/YYYY-MM-DD_DAY_SERVICE_TITLE_target.png
 ```

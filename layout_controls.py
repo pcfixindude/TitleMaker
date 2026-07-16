@@ -88,3 +88,51 @@ def clamp_font_size(
 
 def clamp_skew_angle(value: float) -> float:
     return max(MIN_SKEW_ANGLE, min(MAX_SKEW_ANGLE, float(value)))
+
+
+DEFAULT_TITLE_TOP_PADDING = 100
+DEFAULT_TITLE_BOTTOM_PADDING = 140
+
+
+def compute_auto_title_box(
+    service_box: dict[str, Any],
+    speaker_box: dict[str, Any],
+    title_box: dict[str, Any],
+    top_padding: int = DEFAULT_TITLE_TOP_PADDING,
+    bottom_padding: int = DEFAULT_TITLE_BOTTOM_PADDING,
+) -> dict[str, Any]:
+    """Derive title y/height between service and speaker boxes, keeping other title settings."""
+    result = title_box.copy()
+    service_bottom = int(service_box.get("y", 0)) + int(service_box.get("height", 0))
+    speaker_top = int(speaker_box.get("y", CANVAS_HEIGHT))
+    top = service_bottom + max(0, int(top_padding))
+    bottom = speaker_top - max(0, int(bottom_padding))
+    if bottom <= top + MIN_BOX_SIZE:
+        mid = (service_bottom + speaker_top) // 2
+        top = max(0, mid - MIN_BOX_SIZE // 2)
+        bottom = top + MIN_BOX_SIZE
+    result["y"] = top
+    result["height"] = max(MIN_BOX_SIZE, bottom - top)
+    result["x"] = int(title_box.get("x", service_box.get("x", 280)))
+    result["width"] = int(title_box.get("width", service_box.get("width", 1360)))
+    return clamp_box_to_canvas(result)
+
+
+def resolve_title_box(
+    service_box: dict[str, Any],
+    speaker_box: dict[str, Any],
+    title_box: dict[str, Any],
+    *,
+    auto_title_area: bool = True,
+    title_top_padding: int = DEFAULT_TITLE_TOP_PADDING,
+    title_bottom_padding: int = DEFAULT_TITLE_BOTTOM_PADDING,
+) -> dict[str, Any]:
+    if auto_title_area:
+        return compute_auto_title_box(
+            service_box,
+            speaker_box,
+            title_box,
+            top_padding=title_top_padding,
+            bottom_padding=title_bottom_padding,
+        )
+    return clamp_box_to_canvas(title_box.copy())

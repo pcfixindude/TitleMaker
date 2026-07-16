@@ -37,9 +37,12 @@ from font_settings import (
 from layout_controls import (
     AREA_KEYS,
     MAX_TITLE_FONT_SIZE,
+    DEFAULT_TITLE_BOTTOM_PADDING,
+    DEFAULT_TITLE_TOP_PADDING,
     clamp_box_to_canvas,
     nudge_font_size,
     nudge_skew_angle,
+    resolve_title_box,
     update_layout_box,
 )
 from monark_schedule import (
@@ -68,6 +71,9 @@ from presets import (
     DEFAULT_SPEAKER_BOX,
     DEFAULT_TITLE_BOX,
     GENERATED_BACKGROUND_LABEL,
+    default_preset_name,
+    delete_preset,
+    is_builtin_preset,
     list_presets,
     save_preset,
     settings_from_preset,
@@ -121,7 +127,7 @@ def main() -> None:
         st.session_state.persistence_warning = ""
 
     with st.sidebar:
-        st.header("Monark Schedule Generator")
+        st.header("Schedule")
         schedule_year = st.number_input(
             "Year",
             min_value=1900,
@@ -156,431 +162,242 @@ def main() -> None:
                 st.session_state.pending_schedule_year = None
                 st.success(f"Replaced log with {pending_year} schedule.")
 
-        uploaded_csv = st.file_uploader("Import Service Log CSV", type=["csv"])
-        if uploaded_csv is not None:
-            st.session_state.schedule_entries = entries_from_csv(
-                uploaded_csv.getvalue().decode("utf-8")
-            )
-            st.session_state.service_log_year = infer_log_year(
-                st.session_state.schedule_entries
-            )
-            _select_first_entry()
-            st.success("Imported service log.")
-
         if st.session_state.schedule_entries:
             if st.button("Save Service Log Now", use_container_width=True):
                 _save_service_log_now()
                 st.success("Service log saved.")
 
-            if st.button("Load Service Log", use_container_width=True):
-                if _load_saved_service_log():
-                    st.success(
-                        f"Loaded saved service log for {st.session_state.service_log_year}."
-                    )
+        st.caption("Fonts, layout, presets, and batch tools are under Advanced below.")
+
+    _ensure_valid_choice("background_label", background_labels)
+    _ensure_valid_choice("service_font", font_labels)
+    _ensure_valid_choice("title_font", font_labels)
+    _ensure_valid_choice("speaker_font", font_labels)
+    _prepare_font_widget_defaults(font_labels)
+    _sync_font_settings_from_session()
+    effective_font_settings = _current_font_settings()
+    effective_service_font = get_effective_service_font(effective_font_settings)
+    effective_title_font = get_effective_title_font(effective_font_settings)
+    effective_speaker_font = get_effective_speaker_font(effective_font_settings)
+    background_label = st.session_state.background_label
+    text_color = st.session_state.text_color
+    show_service_line = st.session_state.show_service_line
+    shadow_enabled = st.session_state.shadow_enabled
+    skew_enabled = st.session_state.skew_enabled
+    show_layout_guides = st.session_state.show_layout_guides
+
+    st.markdown("### Booth Mode")
+    st.caption(
+        "Pick the service, type the title and speaker, preview, then export. "
+        "Open Advanced only when you need style or batch tools."
+    )
+
+    if not st.session_state.schedule_entries:
+        st.info(NO_SCHEDULE_MESSAGE)
+        booth_year = st.number_input(
+            "Schedule year",
+            min_value=1900,
+            max_value=2100,
+            value=today.year,
+            step=1,
+            key="booth_schedule_year",
+        )
+        if st.button("Generate Schedule", type="primary", use_container_width=True):
+            _replace_schedule(int(booth_year))
+            st.rerun()
+    else:
+        entries = st.session_state.schedule_entries
+        if _selected_entry() is None:
+            _select_first_entry()
+
+        labels = booth_service_labels(entries)
+        _prepare_booth_selector_widget(labels)
+        selected_label = st.selectbox(
+            "Current service",
+            labels,
+            index=_selected_entry_index(),
+            key="booth_selected_entry_label",
+        )
+        selected_entry = entries[_choice_index(labels, selected_label)]
+        if entry_key(selected_entry) != st.session_state.selected_entry_key:
+            _switch_to_entry_index(_choice_index(labels, selected_label))
+            st.rerun()
+
+        nav_cols = st.columns([1, 1, 1.2])
+        with nav_cols[0]:
+            if st.button("Previous Service", use_container_width=True):
+                _persist_current_booth_inputs()
+                current_index = _selected_entry_index()
+                previous_index = previous_service_index(current_index)
+                if previous_index == current_index:
+                    st.info("Already at the first service.")
                 else:
-                    st.warning("No valid saved service log was found.")
-
-            if st.button("Archive Current Log", use_container_width=True):
-                archive_path = archive_service_log(
-                    st.session_state.schedule_entries,
-                    st.session_state.get("service_log_year"),
-                )
-                st.success(f"Archived to {archive_path}")
-
-            st.download_button(
-                "Export Service Log CSV",
-                data=entries_to_csv(st.session_state.schedule_entries),
-                file_name=f"monark_service_log_{schedule_year}.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-
+                    _switch_to_entry_index(previous_index)
+                    st.rerun()
+        with nav_cols[1]:
+            if st.button("Next Service", use_container_width=True):
+                _persist_current_booth_inputs()
+                current_index = _selected_entry_index()
+                next_index = next_service_index(current_index, len(entries))
+                if next_index == current_index:
+                    st.info("Already at the last service.")
+                else:
+                    _switch_to_entry_index(next_index)
+                    st.rerun()
+        with nav_cols[2]:
             if st.button("Jump to Current Service", use_container_width=True):
-                current = find_current_service_entry(st.session_state.schedule_entries)
+                current = find_current_service_entry(entries)
                 if current:
-                    _load_entry(current)
+                    _switch_to_entry_index(_entry_index_for_key(entry_key(current)))
                     st.success(f"Selected {current['service_line']}")
+                    st.rerun()
                 else:
                     st.info("Today is not in the generated Monark schedule.")
 
-        st.divider()
-        st.header("Style")
-
-        selected_preset_name = st.selectbox("Preset", preset_names, key="preset_name")
-        if st.session_state.get("loaded_preset_name") != selected_preset_name:
-            _apply_preset_to_session(
-                presets_by_name[selected_preset_name],
-                font_labels,
-                background_labels,
-                default_font_label,
-            )
-            st.session_state.loaded_preset_name = selected_preset_name
-
-        _ensure_valid_choice("background_label", background_labels)
-        _ensure_valid_choice("service_font", font_labels)
-        _ensure_valid_choice("title_font", font_labels)
-        _ensure_valid_choice("speaker_font", font_labels)
-        _prepare_font_widget_defaults(font_labels)
-
-        background_label = st.selectbox(
-            "Background",
-            background_labels,
-            index=_choice_index(background_labels, st.session_state.background_label),
-            key="background_label",
-        )
-        service_font = st.selectbox(
-            "Service Line Font",
-            font_labels,
-            index=_choice_index(font_labels, st.session_state.service_font_widget),
-            key="service_font_widget",
-        )
-        title_font_matches_service_font = st.checkbox(
-            "Sermon Title font matches Service Line font",
-            key="title_font_matches_service_font_widget",
-        )
-        if title_font_matches_service_font:
-            title_font = service_font
-            st.caption(f"Sermon Title Font: {title_font}")
-        else:
-            title_font = st.selectbox(
-                "Sermon Title Font",
-                font_labels,
-                index=_choice_index(font_labels, st.session_state.title_font_widget),
-                key="title_font_widget",
-            )
-        speaker_font_matches_service_font = st.checkbox(
-            "Minister / Speaker font matches Service Line font",
-            key="speaker_font_matches_service_font_widget",
-        )
-        if speaker_font_matches_service_font:
-            speaker_font = service_font
-            st.caption(f"Minister / Speaker Font: {speaker_font}")
-        else:
-            speaker_font = st.selectbox(
-                "Minister / Speaker Font",
-                font_labels,
-                index=_choice_index(font_labels, st.session_state.speaker_font_widget),
-                key="speaker_font_widget",
-            )
-        _sync_font_settings_from_widgets(
-            service_font,
-            title_font,
-            speaker_font,
-            title_font_matches_service_font,
-            speaker_font_matches_service_font,
-        )
-        effective_font_settings = _current_font_settings()
-        effective_service_font = get_effective_service_font(effective_font_settings)
-        effective_title_font = get_effective_title_font(effective_font_settings)
-        effective_speaker_font = get_effective_speaker_font(effective_font_settings)
-        with st.expander("Booth font status", expanded=False):
-            st.write(f"Service font: {effective_service_font}")
-            st.write(f"Title font: {effective_title_font}")
-            st.write(f"Speaker font: {effective_speaker_font}")
-        text_color = st.color_picker("Text color", key="text_color")
-        show_service_line = st.checkbox("Show service line", key="show_service_line")
-        shadow_enabled = st.checkbox("Shadow", key="shadow_enabled")
-        skew_enabled = st.checkbox("Skew title", key="skew_enabled")
-        show_layout_guides = st.checkbox("Show layout guides", key="show_layout_guides")
-
-        st.divider()
-        st.header("Export Settings")
-        selected_export_target = st.selectbox(
-            "Export Target",
-            EXPORT_TARGET_NAMES,
-            index=_choice_index(EXPORT_TARGET_NAMES, st.session_state.selected_export_target),
-            key="selected_export_target",
-        )
-        allow_builtin_edit = st.checkbox(
-            "Allow editing built-in export size",
-            key="allow_builtin_export_size_edit",
-            disabled=selected_export_target == "Custom",
-        )
-        custom_or_editable = selected_export_target == "Custom" or allow_builtin_edit
-        st.number_input(
-            "Width",
-            min_value=1,
-            max_value=10000,
-            key="custom_export_width",
-            disabled=not custom_or_editable,
-        )
-        st.number_input(
-            "Height",
-            min_value=1,
-            max_value=10000,
-            key="custom_export_height",
-            disabled=not custom_or_editable,
-        )
-        st.text_input(
-            "Filename suffix",
-            key="custom_export_suffix",
-            disabled=selected_export_target != "Custom",
-        )
-        st.selectbox(
-            "Export layout mode",
-            EXPORT_LAYOUT_MODES,
-            index=_choice_index(EXPORT_LAYOUT_MODES, st.session_state.export_layout_mode),
-            key="export_layout_mode",
-        )
-        st.checkbox("Export multiple targets", key="export_multiple_targets")
-        if st.session_state.export_multiple_targets:
-            st.multiselect(
-                "Targets to export",
-                EXPORT_TARGET_NAMES,
-                default=st.session_state.multi_target_selection,
-                key="multi_target_selection",
-            )
-        current_export_target = resolve_export_target(_current_export_settings())
-        st.caption(
-            f"Export Target: {current_export_target.name} — {current_export_target.width}x{current_export_target.height}"
-        )
-
-        st.subheader("Visual Layout Adjustments")
-        _visual_layout_controls()
-
-        with st.expander("Advanced numeric layout values"):
-            _box_controls("Service line", "service_box")
-            _box_controls("Main title", "title_box", allow_line_spacing=True)
-            _box_controls("Speaker", "speaker_box")
-
-        preset_save_name = st.text_input(
-            "Save current settings as preset",
-            placeholder="Live Camp Style",
-            key="preset_save_name",
-        )
-        if st.button("Save Preset", use_container_width=True):
-            if preset_save_name.strip():
-                save_preset(preset_save_name, _current_preset_settings())
-                st.success(f"Saved preset: {preset_save_name.strip()}")
-                st.rerun()
+        selected_entry = _selected_entry() or entries[0]
+        _prepare_booth_input_widgets(selected_entry)
+        left, right = st.columns([0.95, 1.35], gap="large")
+        with left:
+            st.subheader(selected_entry["service_line"])
+            if selected_entry.get("exported"):
+                st.success("Exported")
             else:
-                st.warning("Enter a preset name first.")
+                st.warning("Not exported yet")
 
-    booth_tab, log_tab = st.tabs(["Booth Mode", "Service Log / Advanced"])
-
-    with booth_tab:
-        st.markdown("### Booth Mode")
-        st.caption(
-            "For best live use, open this page in a browser window and use fullscreen mode."
-        )
-
-        if not st.session_state.schedule_entries:
-            st.info(NO_SCHEDULE_MESSAGE)
-            booth_year = st.number_input(
-                "Schedule year",
-                min_value=1900,
-                max_value=2100,
-                value=today.year,
-                step=1,
-                key="booth_schedule_year",
+            sermon_title = st.text_area(
+                "Sermon title",
+                height=180,
+                key="booth_sermon_title_widget",
+                placeholder="Type title here...",
             )
-            if st.button("Generate Schedule", type="primary", use_container_width=True):
-                _replace_schedule(int(booth_year))
-                st.rerun()
-        else:
-            entries = st.session_state.schedule_entries
-            if _selected_entry() is None:
-                _select_first_entry()
-
-            top_left, top_right = st.columns([1.2, 0.8], gap="large")
-            with top_left:
-                labels = booth_service_labels(entries)
-                _prepare_booth_selector_widget(labels)
-                selected_label = st.selectbox(
-                    "Current service",
-                    labels,
-                    index=_selected_entry_index(),
-                    key="booth_selected_entry_label",
-                )
-                selected_entry = entries[_choice_index(labels, selected_label)]
-                if entry_key(selected_entry) != st.session_state.selected_entry_key:
-                    _switch_to_entry_index(_choice_index(labels, selected_label))
-                    st.rerun()
-
-            with top_right:
-                if st.button(
-                    "Jump to Current Service",
-                    type="secondary",
-                    use_container_width=True,
-                ):
-                    current = find_current_service_entry(entries)
-                    if current:
-                        _switch_to_entry_index(_entry_index_for_key(entry_key(current)))
-                        st.success(f"Selected {current['service_line']}")
-                        st.rerun()
-                    else:
-                        st.info("Today is not in the generated Monark schedule.")
-
-            selected_entry = _selected_entry() or entries[0]
-            _prepare_booth_input_widgets(selected_entry)
-            left, right = st.columns([0.95, 1.35], gap="large")
-            with left:
-                st.subheader(selected_entry["service_line"])
-                if selected_entry.get("exported"):
-                    st.success("This service has already been exported.")
-                else:
-                    st.warning("Not exported yet.")
-
-                sermon_title = st.text_area(
-                    "Sermon title",
-                    height=180,
-                    key="booth_sermon_title_widget",
-                    placeholder="Type title here...",
-                )
-                speaker_name = st.text_input(
-                    "Preacher / speaker",
-                    key="booth_speaker_widget",
-                    placeholder="Type speaker here...",
-                )
-                with st.expander("Notes"):
-                    notes = st.text_area("Notes", height=80, key="booth_notes_widget")
-
-                st.session_state.schedule_entries = update_booth_entry(
-                    st.session_state.schedule_entries,
-                    st.session_state.selected_entry_key,
-                    sermon_title,
-                    speaker_name,
-                    notes,
-                )
-                _save_service_log_now()
-
-                nav_left, nav_right = st.columns(2)
-                with nav_left:
-                    if st.button("Previous Service", use_container_width=True):
-                        _persist_current_booth_inputs()
-                        current_index = _selected_entry_index()
-                        previous_index = previous_service_index(current_index)
-                        if previous_index == current_index:
-                            st.info("Already at the first service.")
-                        else:
-                            _switch_to_entry_index(previous_index)
-                            st.rerun()
-                with nav_right:
-                    if st.button("Next Service", use_container_width=True):
-                        _persist_current_booth_inputs()
-                        current_index = _selected_entry_index()
-                        next_index = next_service_index(current_index, len(entries))
-                        if next_index == current_index:
-                            st.info("Already at the last service.")
-                        else:
-                            _switch_to_entry_index(next_index)
-                            st.rerun()
-
-                options = _options_from_entry(
-                    selected_entry,
-                    sermon_title,
-                    speaker_name,
-                    text_color,
-                    background_label,
-                    background_labels,
-                    template_paths,
-                    effective_service_font,
-                    effective_title_font,
-                    effective_speaker_font,
-                    font_labels,
-                    font_paths,
-                    show_service_line,
-                    shadow_enabled,
-                    skew_enabled,
-                    show_layout_guides,
-                    st.session_state.selected_layout_area,
-                )
-                export_settings = _current_export_settings()
-                current_export_target = resolve_export_target(export_settings)
-                preview_image = render_for_export(
-                    options,
-                    current_export_target,
-                    st.session_state.export_layout_mode,
-                )
-                output_name = export_filename_for_target(options, current_export_target)
-
-                export_label = (
-                    "Re-export Current Image"
-                    if selected_entry.get("exported")
-                    else "Export Current Image"
-                )
-                if st.button(export_label, type="primary", use_container_width=True):
-                    if not sermon_title.strip() or not speaker_name.strip():
-                        st.warning(
-                            "Title or speaker is blank. Confirm below to export anyway."
-                        )
-                        st.session_state.confirm_blank_export = True
-                    else:
-                        _export_current(options)
-
-                if st.session_state.get("confirm_blank_export"):
-                    if st.button("Confirm Blank Export", use_container_width=True):
-                        _export_current(options)
-                        st.session_state.confirm_blank_export = False
-
-                if st.session_state.export_multiple_targets:
-                    if st.button(
-                        "Export Current Image to Selected Targets",
-                        use_container_width=True,
-                    ):
-                        paths = _export_current_multi(options)
-                        st.success(f"Saved {len(paths)} files.")
-
-                if st.session_state.get("last_export_path"):
-                    st.success(f"Saved to {st.session_state.last_export_path}")
-
-                st.download_button(
-                    "Download Preview PNG",
-                    data=_image_to_png_bytes(preview_image),
-                    file_name=output_name,
-                    mime="image/png",
-                    use_container_width=True,
-                )
-
-            with right:
-                st.subheader("Preview")
-                st.image(preview_image, use_container_width=True)
-                st.caption(
-                    f"Export Target: {current_export_target.name} — {current_export_target.width}x{current_export_target.height}"
-                )
-                with st.expander("Status Panel", expanded=True):
-                    st.write(f"Selected service line: {selected_entry['service_line']}")
-                    st.write(
-                        f"Exported: {'Yes' if selected_entry.get('exported') else 'No'}"
-                    )
-                    st.write(f"Exported At: {selected_entry.get('exported_at') or '-'}")
-                    st.write(f"Title present: {'Yes' if sermon_title.strip() else 'No'}")
-                    st.write(
-                        f"Speaker present: {'Yes' if speaker_name.strip() else 'No'}"
-                    )
-                    st.write(
-                        f"Current preset: {st.session_state.get('preset_name', '-')}"
-                    )
-                    st.write(f"Output folder: {EXPORTS_DIR}")
-
-    with log_tab:
-        st.header("Service Log")
-        if not st.session_state.schedule_entries:
-            st.info(NO_SCHEDULE_MESSAGE)
-        else:
-            edited_rows = st.data_editor(
-                _service_log_rows(st.session_state.schedule_entries),
-                hide_index=True,
-                use_container_width=True,
-                num_rows="fixed",
-                column_config={
-                    "Key": st.column_config.TextColumn(disabled=True),
-                    "Include": st.column_config.CheckboxColumn(),
-                    "Exported": st.column_config.CheckboxColumn(disabled=True),
-                },
+            speaker_name = st.text_input(
+                "Speaker / Minister",
+                key="booth_speaker_widget",
+                placeholder="Type speaker here...",
             )
-            st.session_state.schedule_entries = _merge_edited_rows(
-                st.session_state.schedule_entries, edited_rows
+            with st.expander("Notes", expanded=False):
+                notes = st.text_area("Notes", height=80, key="booth_notes_widget")
+
+            st.session_state.schedule_entries = update_booth_entry(
+                st.session_state.schedule_entries,
+                st.session_state.selected_entry_key,
+                sermon_title,
+                speaker_name,
+                notes,
             )
             _save_service_log_now()
 
-            batch_candidates = batch_export_candidates(st.session_state.schedule_entries)
-            if st.button(
-                f"Export Included / Filled Rows ({len(batch_candidates)})",
+            options = _options_from_entry(
+                selected_entry,
+                sermon_title,
+                speaker_name,
+                text_color,
+                background_label,
+                background_labels,
+                template_paths,
+                effective_service_font,
+                effective_title_font,
+                effective_speaker_font,
+                font_labels,
+                font_paths,
+                show_service_line,
+                shadow_enabled,
+                skew_enabled,
+                show_layout_guides,
+                st.session_state.selected_layout_area,
+            )
+            export_settings = _current_export_settings()
+            current_export_target = resolve_export_target(export_settings)
+            preview_image = render_for_export(
+                options,
+                current_export_target,
+                st.session_state.export_layout_mode,
+            )
+            output_name = export_filename_for_target(options, current_export_target)
+
+            export_label = (
+                "Re-export Current Image"
+                if selected_entry.get("exported")
+                else "Export Current Image"
+            )
+            if st.button(export_label, type="primary", use_container_width=True):
+                if not sermon_title.strip() or not speaker_name.strip():
+                    st.warning(
+                        "Title or speaker is blank. Confirm below to export anyway."
+                    )
+                    st.session_state.confirm_blank_export = True
+                else:
+                    _export_current(options)
+
+            if st.session_state.get("confirm_blank_export"):
+                if st.button("Confirm Blank Export", use_container_width=True):
+                    _export_current(options)
+                    st.session_state.confirm_blank_export = False
+
+            if st.session_state.get("last_export_path"):
+                st.caption(f"Last saved: {st.session_state.last_export_path}")
+
+            st.download_button(
+                "Download Preview PNG",
+                data=_image_to_png_bytes(preview_image),
+                file_name=output_name,
+                mime="image/png",
                 use_container_width=True,
-            ):
-                exported = _export_batch(
-                    batch_candidates,
+            )
+
+        with right:
+            st.subheader("Preview")
+            st.image(preview_image, use_container_width=True)
+            st.caption(
+                f"{current_export_target.name} — {current_export_target.width}x{current_export_target.height}"
+            )
+
+    st.divider()
+    st.markdown("### Advanced")
+    st.caption("Collapsed by default. Open only when you need batch tools, styles, fonts, or layout.")
+
+    with st.expander("Advanced: Service Log / Batch Tools", expanded=False):
+        _render_advanced_service_log(
+            schedule_year,
+            text_color,
+            background_label,
+            background_labels,
+            template_paths,
+            effective_service_font,
+            effective_title_font,
+            effective_speaker_font,
+            font_labels,
+            font_paths,
+            show_service_line,
+            shadow_enabled,
+            skew_enabled,
+        )
+
+    with st.expander("Advanced: Style Presets", expanded=False):
+        _render_advanced_style_presets(
+            presets,
+            presets_by_name,
+            preset_names,
+            font_labels,
+            background_labels,
+            default_font_label,
+        )
+
+    with st.expander("Advanced: Fonts", expanded=False):
+        _render_advanced_fonts(font_labels)
+
+    with st.expander("Advanced: Layout", expanded=False):
+        _render_advanced_layout()
+
+    with st.expander("Advanced: Export Targets", expanded=False):
+        _render_advanced_export_targets()
+        if st.session_state.schedule_entries and st.session_state.export_multiple_targets:
+            selected_entry = _selected_entry()
+            if selected_entry:
+                options = _options_from_entry(
+                    selected_entry,
+                    selected_entry.get("title", ""),
+                    selected_entry.get("speaker", ""),
                     text_color,
                     background_label,
                     background_labels,
@@ -593,10 +410,337 @@ def main() -> None:
                     show_service_line,
                     shadow_enabled,
                     skew_enabled,
+                    False,
+                    None,
                 )
-                st.success(f"Exported {exported} images to {EXPORTS_DIR}")
+                if st.button(
+                    "Export Current Image to Selected Targets",
+                    use_container_width=True,
+                ):
+                    paths = _export_current_multi(options)
+                    st.success(f"Saved {len(paths)} files.")
 
     _save_settings_now()
+
+
+def _sync_font_settings_from_session() -> None:
+    """Keep stored font settings available when Advanced Fonts is closed."""
+    st.session_state.font_label = st.session_state.service_font
+
+
+def _render_advanced_service_log(
+    schedule_year: int,
+    text_color: str,
+    background_label: str,
+    background_labels: list[str],
+    template_paths: list[Path],
+    effective_service_font: str,
+    effective_title_font: str,
+    effective_speaker_font: str,
+    font_labels: list[str],
+    font_paths: list[Path],
+    show_service_line: bool,
+    shadow_enabled: bool,
+    skew_enabled: bool,
+) -> None:
+    uploaded_csv = st.file_uploader("Import Service Log CSV", type=["csv"])
+    if uploaded_csv is not None:
+        st.session_state.schedule_entries = entries_from_csv(
+            uploaded_csv.getvalue().decode("utf-8")
+        )
+        st.session_state.service_log_year = infer_log_year(
+            st.session_state.schedule_entries
+        )
+        _select_first_entry()
+        st.success("Imported service log.")
+
+    if not st.session_state.schedule_entries:
+        st.info(NO_SCHEDULE_MESSAGE)
+        return
+
+    if st.button("Load Service Log", use_container_width=True):
+        if _load_saved_service_log():
+            st.success(
+                f"Loaded saved service log for {st.session_state.service_log_year}."
+            )
+        else:
+            st.warning("No valid saved service log was found.")
+
+    if st.button("Archive Current Log", use_container_width=True):
+        archive_path = archive_service_log(
+            st.session_state.schedule_entries,
+            st.session_state.get("service_log_year"),
+        )
+        st.success(f"Archived to {archive_path}")
+
+    st.download_button(
+        "Export Service Log CSV",
+        data=entries_to_csv(st.session_state.schedule_entries),
+        file_name=f"monark_service_log_{schedule_year}.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+    edited_rows = st.data_editor(
+        _service_log_rows(st.session_state.schedule_entries),
+        hide_index=True,
+        use_container_width=True,
+        num_rows="fixed",
+        column_config={
+            "Key": st.column_config.TextColumn(disabled=True),
+            "Include": st.column_config.CheckboxColumn(),
+            "Exported": st.column_config.CheckboxColumn(disabled=True),
+        },
+    )
+    st.session_state.schedule_entries = _merge_edited_rows(
+        st.session_state.schedule_entries, edited_rows
+    )
+    _save_service_log_now()
+
+    batch_candidates = batch_export_candidates(st.session_state.schedule_entries)
+    if st.button(
+        f"Batch Export Included / Filled Rows ({len(batch_candidates)})",
+        use_container_width=True,
+    ):
+        exported = _export_batch(
+            batch_candidates,
+            text_color,
+            background_label,
+            background_labels,
+            template_paths,
+            effective_service_font,
+            effective_title_font,
+            effective_speaker_font,
+            font_labels,
+            font_paths,
+            show_service_line,
+            shadow_enabled,
+            skew_enabled,
+        )
+        st.success(f"Exported {exported} images to {EXPORTS_DIR}")
+
+
+def _render_advanced_style_presets(
+    presets: list[dict],
+    presets_by_name: dict[str, dict],
+    preset_names: list[str],
+    font_labels: list[str],
+    background_labels: list[str],
+    default_font_label: str,
+) -> None:
+    selected_preset_name = st.selectbox("Preset", preset_names, key="preset_name")
+    if st.session_state.get("loaded_preset_name") != selected_preset_name:
+        _apply_preset_to_session(
+            presets_by_name[selected_preset_name],
+            font_labels,
+            background_labels,
+            default_font_label,
+        )
+        st.session_state.loaded_preset_name = selected_preset_name
+
+    st.selectbox(
+        "Background",
+        background_labels,
+        index=_choice_index(background_labels, st.session_state.background_label),
+        key="background_label",
+    )
+    st.color_picker("Text color", key="text_color")
+    st.checkbox("Show service line", key="show_service_line")
+    st.checkbox("Shadow", key="shadow_enabled")
+    st.checkbox("Skew title", key="skew_enabled")
+
+    preset_save_name = st.text_input(
+        "Save current settings as preset",
+        placeholder="Live Camp Style",
+        key="preset_save_name",
+    )
+    if st.button("Save Preset", use_container_width=True):
+        if preset_save_name.strip():
+            save_preset(preset_save_name, _current_preset_settings())
+            st.success(f"Saved preset: {preset_save_name.strip()}")
+            st.rerun()
+        else:
+            st.warning("Enter a preset name first.")
+
+    st.markdown("**Delete preset**")
+    deletable = [name for name in preset_names if not is_builtin_preset(name)]
+    if not deletable:
+        st.caption("No user-created presets to delete. Built-in presets are protected.")
+    else:
+        delete_name = st.selectbox(
+            "User preset to delete",
+            deletable,
+            key="preset_delete_name",
+        )
+        confirm_delete = st.checkbox(
+            f"Confirm delete “{delete_name}”",
+            key="confirm_preset_delete",
+        )
+        if st.button("Delete Preset", use_container_width=True):
+            if not confirm_delete:
+                st.warning("Check the confirmation box before deleting.")
+            else:
+                result = delete_preset(delete_name)
+                if result.get("deleted"):
+                    if st.session_state.get("preset_name") == delete_name:
+                        fallback = result.get("fallback_name") or default_preset_name()
+                        st.session_state.preset_name = fallback
+                        st.session_state.loaded_preset_name = ""
+                        if fallback in presets_by_name:
+                            _apply_preset_to_session(
+                                presets_by_name[fallback],
+                                font_labels,
+                                background_labels,
+                                default_font_label,
+                            )
+                            st.session_state.loaded_preset_name = fallback
+                    st.success(f"Deleted preset: {delete_name}")
+                    st.rerun()
+                else:
+                    st.error(f"Could not delete preset ({result.get('reason')}).")
+
+
+def _render_advanced_fonts(font_labels: list[str]) -> None:
+    _prepare_font_widget_defaults(font_labels)
+    service_font = st.selectbox(
+        "Service Line Font",
+        font_labels,
+        index=_choice_index(font_labels, st.session_state.service_font_widget),
+        key="service_font_widget",
+    )
+    title_font_matches_service_font = st.checkbox(
+        "Sermon Title font matches Service Line font",
+        key="title_font_matches_service_font_widget",
+    )
+    if title_font_matches_service_font:
+        title_font = service_font
+        st.caption(f"Sermon Title Font: {title_font}")
+    else:
+        title_font = st.selectbox(
+            "Sermon Title Font",
+            font_labels,
+            index=_choice_index(font_labels, st.session_state.title_font_widget),
+            key="title_font_widget",
+        )
+    speaker_font_matches_service_font = st.checkbox(
+        "Minister / Speaker font matches Service Line font",
+        key="speaker_font_matches_service_font_widget",
+    )
+    if speaker_font_matches_service_font:
+        speaker_font = service_font
+        st.caption(f"Minister / Speaker Font: {speaker_font}")
+    else:
+        speaker_font = st.selectbox(
+            "Minister / Speaker Font",
+            font_labels,
+            index=_choice_index(font_labels, st.session_state.speaker_font_widget),
+            key="speaker_font_widget",
+        )
+    _sync_font_settings_from_widgets(
+        service_font,
+        title_font,
+        speaker_font,
+        title_font_matches_service_font,
+        speaker_font_matches_service_font,
+    )
+    effective = _current_font_settings()
+    st.write(f"Service font: {get_effective_service_font(effective)}")
+    st.write(f"Title font: {get_effective_title_font(effective)}")
+    st.write(f"Speaker font: {get_effective_speaker_font(effective)}")
+
+
+def _render_advanced_layout() -> None:
+    st.checkbox("Show layout guides", key="show_layout_guides")
+    st.checkbox(
+        "Auto title area between service and speaker",
+        key="auto_title_area",
+        help="When on, the title box fills the space between the service and speaker lines.",
+    )
+    pad_cols = st.columns(2)
+    pad_cols[0].number_input(
+        "Title top padding from service line",
+        min_value=0,
+        max_value=400,
+        key="title_top_padding",
+    )
+    pad_cols[1].number_input(
+        "Title bottom padding from speaker line",
+        min_value=0,
+        max_value=400,
+        key="title_bottom_padding",
+    )
+
+    st.subheader("Visual Layout Adjustments")
+    _visual_layout_controls()
+
+    with st.expander("Advanced numeric layout values", expanded=False):
+        _box_controls("Service line", "service_box")
+        auto_title = bool(st.session_state.auto_title_area)
+        if auto_title:
+            st.info(
+                "Auto title area is on. Title Y and height are derived from the "
+                "service and speaker boxes. Turn it off to edit title Y/height manually."
+            )
+        _box_controls(
+            "Main title",
+            "title_box",
+            allow_line_spacing=True,
+            disable_y_height=auto_title,
+        )
+        _box_controls("Speaker", "speaker_box")
+
+
+def _render_advanced_export_targets() -> None:
+    selected_export_target = st.selectbox(
+        "Export Target",
+        EXPORT_TARGET_NAMES,
+        index=_choice_index(EXPORT_TARGET_NAMES, st.session_state.selected_export_target),
+        key="selected_export_target",
+    )
+    allow_builtin_edit = st.checkbox(
+        "Allow editing built-in export size",
+        key="allow_builtin_export_size_edit",
+        disabled=selected_export_target == "Custom",
+    )
+    custom_or_editable = selected_export_target == "Custom" or allow_builtin_edit
+    st.number_input(
+        "Width",
+        min_value=1,
+        max_value=10000,
+        key="custom_export_width",
+        disabled=not custom_or_editable,
+    )
+    st.number_input(
+        "Height",
+        min_value=1,
+        max_value=10000,
+        key="custom_export_height",
+        disabled=not custom_or_editable,
+    )
+    st.text_input(
+        "Filename suffix",
+        key="custom_export_suffix",
+        disabled=selected_export_target != "Custom",
+    )
+    st.selectbox(
+        "Export layout mode",
+        EXPORT_LAYOUT_MODES,
+        index=_choice_index(EXPORT_LAYOUT_MODES, st.session_state.export_layout_mode),
+        key="export_layout_mode",
+    )
+    st.checkbox("Export multiple targets", key="export_multiple_targets")
+    if st.session_state.export_multiple_targets:
+        st.multiselect(
+            "Targets to export",
+            EXPORT_TARGET_NAMES,
+            default=st.session_state.multi_target_selection,
+            key="multi_target_selection",
+        )
+    current_export_target = resolve_export_target(_current_export_settings())
+    st.caption(
+        f"Export Target: {current_export_target.name} — "
+        f"{current_export_target.width}x{current_export_target.height}"
+    )
 
 
 def _image_to_png_bytes(image) -> bytes:
@@ -636,6 +780,9 @@ def _ensure_defaults(today: date) -> None:
     st.session_state.setdefault("size_step", 10)
     st.session_state.setdefault("font_step", 5)
     st.session_state.setdefault("skew_step", 2.0)
+    st.session_state.setdefault("auto_title_area", True)
+    st.session_state.setdefault("title_top_padding", DEFAULT_TITLE_TOP_PADDING)
+    st.session_state.setdefault("title_bottom_padding", DEFAULT_TITLE_BOTTOM_PADDING)
     for key, value in default_export_settings().items():
         st.session_state.setdefault(key, value)
 
@@ -674,6 +821,9 @@ def _restore_saved_session() -> None:
             "selected_layout_area",
             "shadow_enabled",
             "skew_enabled",
+            "auto_title_area",
+            "title_top_padding",
+            "title_bottom_padding",
         ):
             if key in settings:
                 if key == "service_box":
@@ -754,24 +904,52 @@ def _save_settings_now() -> None:
             "selected_layout_area": st.session_state.selected_layout_area,
             "shadow_enabled": st.session_state.shadow_enabled,
             "skew_enabled": st.session_state.skew_enabled,
+            "auto_title_area": st.session_state.auto_title_area,
+            "title_top_padding": st.session_state.title_top_padding,
+            "title_bottom_padding": st.session_state.title_bottom_padding,
             **_current_export_settings(),
         }
     )
 
 
-def _box_controls(label: str, key: str, allow_line_spacing: bool = False) -> None:
+def _box_controls(
+    label: str,
+    key: str,
+    allow_line_spacing: bool = False,
+    disable_y_height: bool = False,
+) -> None:
     box = st.session_state[key]
     st.markdown(f"**{label}**")
     cols = st.columns(2)
     box["x"] = cols[0].number_input(f"{label} X", 0, 1920, int(box["x"]))
-    box["y"] = cols[1].number_input(f"{label} Y", 0, 1080, int(box["y"]))
+    if disable_y_height:
+        cols[1].number_input(
+            f"{label} Y (auto)",
+            0,
+            1080,
+            int(box["y"]),
+            disabled=True,
+            key=f"{key}_y_auto_display",
+        )
+    else:
+        box["y"] = cols[1].number_input(f"{label} Y", 0, 1080, int(box["y"]))
     cols = st.columns(2)
     box["width"] = cols[0].number_input(
         f"{label} Width", 50, 1920, int(box["width"])
     )
-    box["height"] = cols[1].number_input(
-        f"{label} Height", 30, 1080, int(box["height"])
-    )
+    if disable_y_height:
+        cols[1].number_input(
+            f"{label} Height (auto)",
+            30,
+            1080,
+            int(box["height"]),
+            disabled=True,
+            key=f"{key}_height_auto_display",
+        )
+    else:
+        box["height"] = cols[1].number_input(
+            f"{label} Height", 30, 1080, int(box["height"])
+        )
     box["alignment"] = st.selectbox(
         f"{label} Alignment",
         ALIGNMENTS,
@@ -1111,6 +1289,18 @@ def _options_from_entry(
     show_layout_guides: bool,
     selected_layout_area: str | None = None,
 ) -> TitleImageOptions:
+    title_box = resolve_title_box(
+        st.session_state.service_box,
+        st.session_state.speaker_box,
+        st.session_state.title_box,
+        auto_title_area=bool(st.session_state.get("auto_title_area", True)),
+        title_top_padding=int(
+            st.session_state.get("title_top_padding", DEFAULT_TITLE_TOP_PADDING)
+        ),
+        title_bottom_padding=int(
+            st.session_state.get("title_bottom_padding", DEFAULT_TITLE_BOTTOM_PADDING)
+        ),
+    )
     return TitleImageOptions(
         day=entry["weekday"],
         service=entry["service"],
@@ -1123,7 +1313,7 @@ def _options_from_entry(
         title_font_path=_selected_font(title_font, font_labels, font_paths),
         speaker_font_path=_selected_font(speaker_font, font_labels, font_paths),
         service_line_box=_text_box(st.session_state.service_box),
-        title_box=_text_box(st.session_state.title_box),
+        title_box=_text_box(title_box),
         speaker_box=_text_box(st.session_state.speaker_box),
         shadow_enabled=shadow_enabled,
         show_service_line=show_service_line,
@@ -1231,6 +1421,9 @@ def _current_preset_settings() -> dict:
         "selected_layout_area": st.session_state.selected_layout_area,
         "shadow_enabled": st.session_state.shadow_enabled,
         "skew_enabled": st.session_state.skew_enabled,
+        "auto_title_area": st.session_state.auto_title_area,
+        "title_top_padding": st.session_state.title_top_padding,
+        "title_bottom_padding": st.session_state.title_bottom_padding,
     }
 
 
@@ -1282,6 +1475,13 @@ def _apply_preset_to_session(
     st.session_state.selected_layout_area = settings["selected_layout_area"]
     st.session_state.shadow_enabled = settings["shadow_enabled"]
     st.session_state.skew_enabled = settings["skew_enabled"]
+    st.session_state.auto_title_area = bool(settings.get("auto_title_area", True))
+    st.session_state.title_top_padding = int(
+        settings.get("title_top_padding", DEFAULT_TITLE_TOP_PADDING)
+    )
+    st.session_state.title_bottom_padding = int(
+        settings.get("title_bottom_padding", DEFAULT_TITLE_BOTTOM_PADDING)
+    )
     for key, value in export_settings.items():
         st.session_state[key] = value
 

@@ -395,6 +395,9 @@ def _draw_main_title(
     image.paste(skewed, (paste_x, paste_y), skewed)
 
 
+MIN_TITLE_FONT_SIZE = 20
+
+
 def _fit_title(
     title: str,
     max_width: int,
@@ -403,23 +406,55 @@ def _fit_title(
     auto_size: bool,
     title_font_size: int,
     line_spacing: float,
+    min_size: int = MIN_TITLE_FONT_SIZE,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
     probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
-    start_size = max(48, min(title_font_size, MAX_TITLE_FONT_SIZE))
+    start_size = max(min_size, min(int(title_font_size), MAX_TITLE_FONT_SIZE))
+    spacing = _effective_line_spacing(font_path, line_spacing)
 
-    for size in range(start_size, 87, -4):
-        font = _load_font(size, font_path)
-        line_height = max(1, round(size * _effective_line_spacing(font_path, line_spacing)))
+    if not auto_size:
+        font = _load_font(start_size, font_path)
         lines = _wrap_title(title, font, max_width, probe)
+        line_height = max(1, round(start_size * spacing))
         block_width = max((_text_width(probe, line, font) for line in lines), default=0)
         block_height = line_height * len(lines)
+        return font, lines, line_height, block_width, block_height
 
-        if not auto_size or (block_width <= max_width and block_height <= max_height):
-            return font, lines, line_height, block_width, block_height
+    best: tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int] | None = None
+    best_score: tuple[int, int, int] | None = None
 
-    fallback_font = _load_font(88, font_path)
-    fallback_lines = _wrap_title(title, fallback_font, max_width, probe)
-    line_height = max(1, round(88 * _effective_line_spacing(font_path, line_spacing)))
+    for size in range(start_size, min_size - 1, -2):
+        font = _load_font(size, font_path)
+        line_height = max(1, round(size * spacing))
+        max_lines = max(1, max_height // line_height)
+        lines = _wrap_title(title, font, max_width, probe, balance=True)
+        if not lines:
+            return font, [], line_height, 0, 0
+
+        block_width = max((_text_width(probe, line, font) for line in lines), default=0)
+        block_height = line_height * len(lines)
+        if any(_text_width(probe, line, font) > max_width for line in lines):
+            continue
+        if block_height > max_height or len(lines) > max_lines:
+            continue
+
+        orphan_penalty = _orphan_penalty(lines)
+        # Prefer: larger font, fewer lines, less orphan imbalance
+        score = (size, -len(lines), -orphan_penalty)
+        if best_score is None or score > best_score:
+            best = (font, lines, line_height, block_width, block_height)
+            best_score = score
+            # Largest size that fits wins; stop once we have a fit at this size
+            # (continue only if a same-size better wrap appears — size decreases).
+            break
+
+    if best is not None:
+        return best
+
+    fallback_size = min_size
+    fallback_font = _load_font(fallback_size, font_path)
+    fallback_lines = _wrap_title(title, fallback_font, max_width, probe, balance=True)
+    line_height = max(1, round(fallback_size * spacing))
     block_width = max(
         (_text_width(probe, line, fallback_font) for line in fallback_lines), default=0
     )
@@ -439,11 +474,23 @@ def _effective_line_spacing(font_path: Path | None, requested: float) -> float:
     return requested if requested > 0 else _line_spacing(font_path)
 
 
+def _orphan_penalty(lines: list[str]) -> int:
+    if len(lines) < 2:
+        return 0
+    last_words = lines[-1].split()
+    if len(last_words) == 1 and len(lines[-2].split()) >= 3:
+        return 2
+    if len(last_words) <= 2 and len(lines[-2].split()) >= 4:
+        return 1
+    return 0
+
+
 def _wrap_title(
     title: str,
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     max_width: int,
     draw: ImageDraw.ImageDraw,
+    balance: bool = False,
 ) -> list[str]:
     if not title.strip():
         return []
@@ -453,21 +500,57 @@ def _wrap_title(
         words = manual_line.split()
         if not words:
             continue
-
-        current = ""
-        for word in words:
-            candidate = f"{current} {word}".strip()
-            if not current or _text_width(draw, candidate, font) <= max_width:
-                current = candidate
-                continue
-
-            lines.append(current)
-            current = word
-
-        if current:
-            lines.append(current)
+        wrapped = _wrap_words(words, font, max_width, draw)
+        if balance and len(wrapped) >= 2 and "\n" not in manual_line:
+            wrapped = _rebalance_last_line(wrapped, font, max_width, draw)
+        lines.extend(wrapped)
 
     return lines
+
+
+def _wrap_words(
+    words: list[str],
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    max_width: int,
+    draw: ImageDraw.ImageDraw,
+) -> list[str]:
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if not current or _text_width(draw, candidate, font) <= max_width:
+            current = candidate
+            continue
+        lines.append(current)
+        current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _rebalance_last_line(
+    lines: list[str],
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    max_width: int,
+    draw: ImageDraw.ImageDraw,
+) -> list[str]:
+    """Pull a trailing word down when the last line is a tiny orphan."""
+    if len(lines) < 2:
+        return lines
+    result = list(lines)
+    while len(result) >= 2:
+        last_words = result[-1].split()
+        prev_words = result[-2].split()
+        if len(last_words) != 1 or len(prev_words) < 3:
+            break
+        moved = prev_words[-1]
+        new_prev = " ".join(prev_words[:-1])
+        new_last = f"{moved} {result[-1]}".strip()
+        if _text_width(draw, new_last, font) > max_width:
+            break
+        result[-2] = new_prev
+        result[-1] = new_last
+    return result
 
 
 def fit_title_metrics_for_test(
@@ -497,7 +580,23 @@ def fit_title_lines_for_test(
 ) -> list[str]:
     font = _load_font(font_size, font_path)
     draw = ImageDraw.Draw(Image.new("RGB", (10, 10)))
-    return _wrap_title(format_title(title), font, max_width, draw)
+    return _wrap_title(format_title(title), font, max_width, draw, balance=True)
+
+
+def fit_title_font_size_for_test(
+    title: str,
+    max_width: int = 1360,
+    max_height: int = 430,
+    font_size: int = MAX_TITLE_FONT_SIZE,
+) -> int:
+    font, _, _, _, _ = fit_title_metrics_for_test(
+        title,
+        max_width=max_width,
+        max_height=max_height,
+        font_size=font_size,
+        auto_size=True,
+    )
+    return getattr(font, "size", font_size)
 
 
 def _fit_box_text(

@@ -24,7 +24,7 @@ class TitleRendererTest(unittest.TestCase):
         self.assertEqual(lines, ["THE LOVE OF GOD", "IN A DARK WORLD"])
 
     def test_title_font_max_size_allows_400(self) -> None:
-        _, _, line_height, _, _ = fit_title_metrics_for_test(
+        font, _, line_height, _, _ = fit_title_metrics_for_test(
             "GO",
             max_width=5000,
             max_height=1000,
@@ -32,10 +32,11 @@ class TitleRendererTest(unittest.TestCase):
             auto_size=True,
         )
 
-        self.assertGreaterEqual(line_height, 300)
+        self.assertGreaterEqual(getattr(font, "size", 0), 300)
+        self.assertGreaterEqual(line_height, 250)
 
     def test_manual_title_font_size_can_be_400(self) -> None:
-        _, _, line_height, _, _ = fit_title_metrics_for_test(
+        font, _, line_height, _, _ = fit_title_metrics_for_test(
             "GO",
             max_width=5000,
             max_height=1000,
@@ -43,6 +44,7 @@ class TitleRendererTest(unittest.TestCase):
             auto_size=False,
         )
 
+        self.assertEqual(getattr(font, "size", 0), 400)
         self.assertGreaterEqual(line_height, 300)
 
     def test_zero_positive_and_negative_skew_angles_render(self) -> None:
