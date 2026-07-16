@@ -20,17 +20,20 @@ from title_renderer import (
 from layout_controls import (
     MAX_TITLE_FONT_SIZE,
     DEFAULT_TITLE_BOTTOM_PADDING,
+    DEFAULT_TITLE_SIDE_PADDING,
     DEFAULT_TITLE_TOP_PADDING,
+    DEFAULT_TITLE_VERTICAL_GAP,
     clamp_skew_angle,
+    resolve_auto_title_layout_settings,
 )
 
 
 GENERATED_BACKGROUND_LABEL = "Generated blue/gray background"
 ALIGNMENTS = ["center", "left", "right"]
 DEFAULT_SERVICE_BOX = {
-    "x": 280,
-    "y": DEFAULT_TOP_POSITION[1],
-    "width": 1360,
+    "x": 120,
+    "y": 130,
+    "width": 1680,
     "height": 110,
     "alignment": "center",
     "auto_size": True,
@@ -40,10 +43,10 @@ DEFAULT_SERVICE_BOX = {
     "skew_angle": 0.0,
 }
 DEFAULT_TITLE_BOX = {
-    "x": 280,
-    "y": DEFAULT_TITLE_POSITION[1] - 215,
-    "width": 1360,
-    "height": 430,
+    "x": 120,
+    "y": 280,
+    "width": 1680,
+    "height": 380,
     "alignment": "center",
     "auto_size": True,
     "font_size": 218,
@@ -52,10 +55,10 @@ DEFAULT_TITLE_BOX = {
     "skew_angle": -7.0,
 }
 DEFAULT_SPEAKER_BOX = {
-    "x": 280,
-    "y": DEFAULT_BOTTOM_POSITION[1],
-    "width": 1360,
-    "height": 110,
+    "x": 120,
+    "y": 700,
+    "width": 1680,
+    "height": 120,
     "alignment": "center",
     "auto_size": True,
     "font_size": 80,
@@ -89,9 +92,12 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "show_layout_guides": False,
         "selected_layout_area": "Sermon Title",
         "skew_enabled": True,
+        "auto_title_box_between_service_and_speaker": True,
+        "title_side_padding": DEFAULT_TITLE_SIDE_PADDING,
+        "title_vertical_gap": DEFAULT_TITLE_VERTICAL_GAP,
         "auto_title_area": True,
-        "title_top_padding": DEFAULT_TITLE_TOP_PADDING,
-        "title_bottom_padding": DEFAULT_TITLE_BOTTOM_PADDING,
+        "title_top_padding": DEFAULT_TITLE_VERTICAL_GAP,
+        "title_bottom_padding": DEFAULT_TITLE_VERTICAL_GAP,
         **migrate_export_settings({}),
     },
     {
@@ -107,20 +113,23 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "text_color": "#111111",
         "background_choice": GENERATED_BACKGROUND_LABEL,
         "title_position": [960, 540],
-        "service_line_position": [960, 112],
-        "speaker_line_position": [960, 902],
-        "service_line_box": {**DEFAULT_SERVICE_BOX, "alignment": "center"},
+        "service_line_position": [960, 130],
+        "speaker_line_position": [960, 700],
+        "service_line_box": {**DEFAULT_SERVICE_BOX},
         "title_box": {**DEFAULT_TITLE_BOX, "font_size": 198},
-        "speaker_box": DEFAULT_SPEAKER_BOX,
+        "speaker_box": {**DEFAULT_SPEAKER_BOX},
         "text_alignment": "center",
         "shadow_enabled": False,
         "show_service_line": True,
         "show_layout_guides": False,
         "selected_layout_area": "Sermon Title",
         "skew_enabled": False,
+        "auto_title_box_between_service_and_speaker": True,
+        "title_side_padding": DEFAULT_TITLE_SIDE_PADDING,
+        "title_vertical_gap": DEFAULT_TITLE_VERTICAL_GAP,
         "auto_title_area": True,
-        "title_top_padding": DEFAULT_TITLE_TOP_PADDING,
-        "title_bottom_padding": DEFAULT_TITLE_BOTTOM_PADDING,
+        "title_top_padding": DEFAULT_TITLE_VERTICAL_GAP,
+        "title_bottom_padding": DEFAULT_TITLE_VERTICAL_GAP,
         **migrate_export_settings({}),
     },
     {
@@ -135,21 +144,24 @@ BUILT_IN_PRESETS: list[dict[str, Any]] = [
         "title_font_size": 230,
         "text_color": "#FFFFFF",
         "background_choice": GENERATED_BACKGROUND_LABEL,
-        "title_position": [960, 520],
-        "service_line_position": [960, 92],
-        "speaker_line_position": [960, 910],
-        "service_line_box": {**DEFAULT_SERVICE_BOX, "y": 92},
-        "title_box": {**DEFAULT_TITLE_BOX, "y": 305, "font_size": 230},
-        "speaker_box": {**DEFAULT_SPEAKER_BOX, "y": 910},
+        "title_position": [960, 470],
+        "service_line_position": [960, 100],
+        "speaker_line_position": [960, 720],
+        "service_line_box": {**DEFAULT_SERVICE_BOX, "y": 100},
+        "title_box": {**DEFAULT_TITLE_BOX, "font_size": 230},
+        "speaker_box": {**DEFAULT_SPEAKER_BOX, "y": 720},
         "text_alignment": "center",
         "shadow_enabled": True,
         "show_service_line": True,
         "show_layout_guides": False,
         "selected_layout_area": "Sermon Title",
         "skew_enabled": True,
+        "auto_title_box_between_service_and_speaker": True,
+        "title_side_padding": DEFAULT_TITLE_SIDE_PADDING,
+        "title_vertical_gap": DEFAULT_TITLE_VERTICAL_GAP,
         "auto_title_area": True,
-        "title_top_padding": DEFAULT_TITLE_TOP_PADDING,
-        "title_bottom_padding": DEFAULT_TITLE_BOTTOM_PADDING,
+        "title_top_padding": DEFAULT_TITLE_VERTICAL_GAP,
+        "title_bottom_padding": DEFAULT_TITLE_VERTICAL_GAP,
         **migrate_export_settings({}),
     },
 ]
@@ -159,8 +171,7 @@ def ensure_builtin_presets() -> None:
     ensure_project_dirs()
     for preset in BUILT_IN_PRESETS:
         path = PRESETS_DIR / f"{_slug(preset['name'])}.json"
-        if not path.exists():
-            _write_json(path, preset)
+        _write_json(path, normalize_preset(preset))
 
 
 def list_presets() -> list[dict[str, Any]]:
@@ -310,13 +321,7 @@ def normalize_preset(raw: dict[str, Any]) -> dict[str, Any]:
         if raw.get("selected_layout_area") in {"Service Line", "Sermon Title", "Speaker"}
         else "Sermon Title",
         "skew_enabled": bool(raw.get("skew_enabled", True)),
-        "auto_title_area": bool(raw.get("auto_title_area", True)),
-        "title_top_padding": _int_in_range(
-            raw.get("title_top_padding", DEFAULT_TITLE_TOP_PADDING), 0, 400
-        ),
-        "title_bottom_padding": _int_in_range(
-            raw.get("title_bottom_padding", DEFAULT_TITLE_BOTTOM_PADDING), 0, 400
-        ),
+        **resolve_auto_title_layout_settings(raw),
         **export_settings,
     }
 

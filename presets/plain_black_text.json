@@ -1,6 +1,11 @@
 {
   "name": "Plain Black Text",
   "font_choice": "Automatic fallback (Bebas Neue/system)",
+  "service_font": "Automatic fallback (Bebas Neue/system)",
+  "title_font": "Automatic fallback (Bebas Neue/system)",
+  "speaker_font": "Automatic fallback (Bebas Neue/system)",
+  "title_font_matches_service_font": true,
+  "speaker_font_matches_service_font": true,
   "auto_size": true,
   "title_font_size": 198,
   "text_color": "#111111",
@@ -11,13 +16,69 @@
   ],
   "service_line_position": [
     960,
-    112
+    130
   ],
   "speaker_line_position": [
     960,
-    902
+    700
   ],
+  "service_line_box": {
+    "x": 120,
+    "y": 130,
+    "width": 1680,
+    "height": 110,
+    "alignment": "center",
+    "auto_size": true,
+    "font_size": 86,
+    "max_font_size": 260,
+    "line_spacing": 1.0,
+    "skew_angle": 0.0
+  },
+  "title_box": {
+    "x": 120,
+    "y": 280,
+    "width": 1680,
+    "height": 380,
+    "alignment": "center",
+    "auto_size": true,
+    "font_size": 198,
+    "max_font_size": 400,
+    "line_spacing": 0.9,
+    "skew_angle": -7.0
+  },
+  "speaker_box": {
+    "x": 120,
+    "y": 700,
+    "width": 1680,
+    "height": 120,
+    "alignment": "center",
+    "auto_size": true,
+    "font_size": 80,
+    "max_font_size": 260,
+    "line_spacing": 1.0,
+    "skew_angle": 0.0
+  },
   "text_alignment": "center",
   "shadow_enabled": false,
-  "show_service_line": true
+  "show_service_line": true,
+  "show_layout_guides": false,
+  "selected_layout_area": "Sermon Title",
+  "skew_enabled": false,
+  "auto_title_box_between_service_and_speaker": true,
+  "title_side_padding": 120,
+  "title_vertical_gap": 40,
+  "auto_title_area": true,
+  "title_top_padding": 40,
+  "title_bottom_padding": 40,
+  "selected_export_target": "Stream 1080p",
+  "custom_export_width": 1920,
+  "custom_export_height": 1080,
+  "custom_export_suffix": "custom_1920x1080",
+  "allow_builtin_export_size_edit": false,
+  "export_layout_mode": "Scale to fit",
+  "export_multiple_targets": false,
+  "multi_target_selection": [
+    "Stream 1080p",
+    "YouTube Thumbnail"
+  ]
 }

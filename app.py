@@ -37,12 +37,13 @@ from font_settings import (
 from layout_controls import (
     AREA_KEYS,
     MAX_TITLE_FONT_SIZE,
-    DEFAULT_TITLE_BOTTOM_PADDING,
-    DEFAULT_TITLE_TOP_PADDING,
+    DEFAULT_TITLE_SIDE_PADDING,
+    DEFAULT_TITLE_VERTICAL_GAP,
     clamp_box_to_canvas,
+    get_effective_layout_boxes,
     nudge_font_size,
     nudge_skew_angle,
-    resolve_title_box,
+    resolve_auto_title_layout_settings,
     update_layout_box,
 )
 from monark_schedule import (
@@ -651,41 +652,78 @@ def _render_advanced_fonts(font_labels: list[str]) -> None:
 
 def _render_advanced_layout() -> None:
     st.checkbox("Show layout guides", key="show_layout_guides")
+
+    st.markdown("#### Title Auto Layout")
+    st.caption(
+        "When enabled, the sermon title region automatically fills the space "
+        "between the service line and speaker line with equal spacing above and below."
+    )
     st.checkbox(
-        "Auto title area between service and speaker",
-        key="auto_title_area",
-        help="When on, the title box fills the space between the service and speaker lines.",
+        "Auto-size title box between service and speaker",
+        key="auto_title_box_between_service_and_speaker",
     )
     pad_cols = st.columns(2)
     pad_cols[0].number_input(
-        "Title top padding from service line",
+        "Title side padding",
         min_value=0,
-        max_value=400,
-        key="title_top_padding",
+        max_value=800,
+        key="title_side_padding",
+        help="Equal left/right padding. At 1920px width, 120 gives a 1680px-wide title box.",
     )
     pad_cols[1].number_input(
-        "Title bottom padding from speaker line",
+        "Title vertical gap",
         min_value=0,
         max_value=400,
-        key="title_bottom_padding",
+        key="title_vertical_gap",
+        help="Equal gap above and below the title box between service and speaker.",
     )
 
+    # Keep legacy keys synchronized for persistence/migration.
+    st.session_state.auto_title_area = bool(
+        st.session_state.auto_title_box_between_service_and_speaker
+    )
+    st.session_state.title_top_padding = int(st.session_state.title_vertical_gap)
+    st.session_state.title_bottom_padding = int(st.session_state.title_vertical_gap)
+
+    effective = get_effective_layout_boxes(
+        {
+            "service_box": st.session_state.service_box,
+            "title_box": st.session_state.title_box,
+            "speaker_box": st.session_state.speaker_box,
+            "auto_title_box_between_service_and_speaker": st.session_state.auto_title_box_between_service_and_speaker,
+            "title_side_padding": st.session_state.title_side_padding,
+            "title_vertical_gap": st.session_state.title_vertical_gap,
+        }
+    )
+    if effective.get("warning"):
+        st.warning(effective["warning"])
+    elif st.session_state.auto_title_box_between_service_and_speaker:
+        box = effective["title_box"]
+        st.caption(
+            f"Effective title box: x={box['x']}, y={box['y']}, "
+            f"width={box['width']}, height={box['height']}"
+        )
+
     st.subheader("Visual Layout Adjustments")
-    _visual_layout_controls()
+    _visual_layout_controls(
+        disable_title_geometry=bool(
+            st.session_state.auto_title_box_between_service_and_speaker
+        )
+    )
 
     with st.expander("Advanced numeric layout values", expanded=False):
         _box_controls("Service line", "service_box")
-        auto_title = bool(st.session_state.auto_title_area)
+        auto_title = bool(st.session_state.auto_title_box_between_service_and_speaker)
         if auto_title:
             st.info(
-                "Auto title area is on. Title Y and height are derived from the "
-                "service and speaker boxes. Turn it off to edit title Y/height manually."
+                "Auto title box is on. Title X/Y/width/height are calculated. "
+                "Turn it off to edit the title box manually."
             )
         _box_controls(
             "Main title",
             "title_box",
             allow_line_spacing=True,
-            disable_y_height=auto_title,
+            disable_geometry=auto_title,
         )
         _box_controls("Speaker", "speaker_box")
 
@@ -780,9 +818,19 @@ def _ensure_defaults(today: date) -> None:
     st.session_state.setdefault("size_step", 10)
     st.session_state.setdefault("font_step", 5)
     st.session_state.setdefault("skew_step", 2.0)
-    st.session_state.setdefault("auto_title_area", True)
-    st.session_state.setdefault("title_top_padding", DEFAULT_TITLE_TOP_PADDING)
-    st.session_state.setdefault("title_bottom_padding", DEFAULT_TITLE_BOTTOM_PADDING)
+    st.session_state.setdefault("auto_title_box_between_service_and_speaker", True)
+    st.session_state.setdefault("title_side_padding", DEFAULT_TITLE_SIDE_PADDING)
+    st.session_state.setdefault("title_vertical_gap", DEFAULT_TITLE_VERTICAL_GAP)
+    st.session_state.setdefault(
+        "auto_title_area",
+        st.session_state.auto_title_box_between_service_and_speaker,
+    )
+    st.session_state.setdefault(
+        "title_top_padding", st.session_state.title_vertical_gap
+    )
+    st.session_state.setdefault(
+        "title_bottom_padding", st.session_state.title_vertical_gap
+    )
     for key, value in default_export_settings().items():
         st.session_state.setdefault(key, value)
 
@@ -821,6 +869,9 @@ def _restore_saved_session() -> None:
             "selected_layout_area",
             "shadow_enabled",
             "skew_enabled",
+            "auto_title_box_between_service_and_speaker",
+            "title_side_padding",
+            "title_vertical_gap",
             "auto_title_area",
             "title_top_padding",
             "title_bottom_padding",
@@ -840,6 +891,9 @@ def _restore_saved_session() -> None:
                     )
                 else:
                     st.session_state[key] = settings[key]
+        layout = resolve_auto_title_layout_settings(settings)
+        for key, value in layout.items():
+            st.session_state[key] = value
     elif SETTINGS_PATH.exists():
         st.session_state.persistence_warning = (
             "Saved settings could not be read, so defaults were used."
@@ -904,9 +958,12 @@ def _save_settings_now() -> None:
             "selected_layout_area": st.session_state.selected_layout_area,
             "shadow_enabled": st.session_state.shadow_enabled,
             "skew_enabled": st.session_state.skew_enabled,
-            "auto_title_area": st.session_state.auto_title_area,
-            "title_top_padding": st.session_state.title_top_padding,
-            "title_bottom_padding": st.session_state.title_bottom_padding,
+            "auto_title_box_between_service_and_speaker": st.session_state.auto_title_box_between_service_and_speaker,
+            "title_side_padding": st.session_state.title_side_padding,
+            "title_vertical_gap": st.session_state.title_vertical_gap,
+            "auto_title_area": st.session_state.auto_title_box_between_service_and_speaker,
+            "title_top_padding": st.session_state.title_vertical_gap,
+            "title_bottom_padding": st.session_state.title_vertical_gap,
             **_current_export_settings(),
         }
     )
@@ -916,13 +973,20 @@ def _box_controls(
     label: str,
     key: str,
     allow_line_spacing: bool = False,
-    disable_y_height: bool = False,
+    disable_geometry: bool = False,
 ) -> None:
     box = st.session_state[key]
     st.markdown(f"**{label}**")
     cols = st.columns(2)
-    box["x"] = cols[0].number_input(f"{label} X", 0, 1920, int(box["x"]))
-    if disable_y_height:
+    if disable_geometry:
+        cols[0].number_input(
+            f"{label} X (auto)",
+            0,
+            1920,
+            int(box["x"]),
+            disabled=True,
+            key=f"{key}_x_auto_display",
+        )
         cols[1].number_input(
             f"{label} Y (auto)",
             0,
@@ -932,12 +996,18 @@ def _box_controls(
             key=f"{key}_y_auto_display",
         )
     else:
+        box["x"] = cols[0].number_input(f"{label} X", 0, 1920, int(box["x"]))
         box["y"] = cols[1].number_input(f"{label} Y", 0, 1080, int(box["y"]))
     cols = st.columns(2)
-    box["width"] = cols[0].number_input(
-        f"{label} Width", 50, 1920, int(box["width"])
-    )
-    if disable_y_height:
+    if disable_geometry:
+        cols[0].number_input(
+            f"{label} Width (auto)",
+            50,
+            1920,
+            int(box["width"]),
+            disabled=True,
+            key=f"{key}_width_auto_display",
+        )
         cols[1].number_input(
             f"{label} Height (auto)",
             30,
@@ -947,6 +1017,9 @@ def _box_controls(
             key=f"{key}_height_auto_display",
         )
     else:
+        box["width"] = cols[0].number_input(
+            f"{label} Width", 50, 1920, int(box["width"])
+        )
         box["height"] = cols[1].number_input(
             f"{label} Height", 30, 1080, int(box["height"])
         )
@@ -989,7 +1062,7 @@ def _box_controls(
     st.session_state[key] = clamp_box_to_canvas(box)
 
 
-def _visual_layout_controls() -> None:
+def _visual_layout_controls(*, disable_title_geometry: bool = False) -> None:
     selected_area = st.selectbox(
         "Text area to adjust",
         list(AREA_KEYS.keys()),
@@ -1022,22 +1095,29 @@ def _visual_layout_controls() -> None:
         key="skew_step",
     )
 
-    st.caption("Position")
-    row = st.columns([1, 1, 1])
-    row[1].button("Up", on_click=_nudge_box, args=(selected_area, 0, -position_step, 0, 0), use_container_width=True)
-    row = st.columns([1, 1, 1])
-    row[0].button("Left", on_click=_nudge_box, args=(selected_area, -position_step, 0, 0, 0), use_container_width=True)
-    row[1].markdown("<div style='text-align:center'>Move</div>", unsafe_allow_html=True)
-    row[2].button("Right", on_click=_nudge_box, args=(selected_area, position_step, 0, 0, 0), use_container_width=True)
-    row = st.columns([1, 1, 1])
-    row[1].button("Down", on_click=_nudge_box, args=(selected_area, 0, position_step, 0, 0), use_container_width=True)
+    geometry_locked = disable_title_geometry and selected_area == "Sermon Title"
+    if geometry_locked:
+        st.caption(
+            "Title position/size are controlled by Auto Title Layout. "
+            "Font size and italic slant can still be adjusted."
+        )
+    else:
+        st.caption("Position")
+        row = st.columns([1, 1, 1])
+        row[1].button("Up", on_click=_nudge_box, args=(selected_area, 0, -position_step, 0, 0), use_container_width=True)
+        row = st.columns([1, 1, 1])
+        row[0].button("Left", on_click=_nudge_box, args=(selected_area, -position_step, 0, 0, 0), use_container_width=True)
+        row[1].markdown("<div style='text-align:center'>Move</div>", unsafe_allow_html=True)
+        row[2].button("Right", on_click=_nudge_box, args=(selected_area, position_step, 0, 0, 0), use_container_width=True)
+        row = st.columns([1, 1, 1])
+        row[1].button("Down", on_click=_nudge_box, args=(selected_area, 0, position_step, 0, 0), use_container_width=True)
 
-    st.caption("Size")
-    row = st.columns(4)
-    row[0].button("Wider", on_click=_nudge_box, args=(selected_area, 0, 0, size_step, 0), use_container_width=True)
-    row[1].button("Narrower", on_click=_nudge_box, args=(selected_area, 0, 0, -size_step, 0), use_container_width=True)
-    row[2].button("Taller", on_click=_nudge_box, args=(selected_area, 0, 0, 0, size_step), use_container_width=True)
-    row[3].button("Shorter", on_click=_nudge_box, args=(selected_area, 0, 0, 0, -size_step), use_container_width=True)
+        st.caption("Size")
+        row = st.columns(4)
+        row[0].button("Wider", on_click=_nudge_box, args=(selected_area, 0, 0, size_step, 0), use_container_width=True)
+        row[1].button("Narrower", on_click=_nudge_box, args=(selected_area, 0, 0, -size_step, 0), use_container_width=True)
+        row[2].button("Taller", on_click=_nudge_box, args=(selected_area, 0, 0, 0, size_step), use_container_width=True)
+        row[3].button("Shorter", on_click=_nudge_box, args=(selected_area, 0, 0, 0, -size_step), use_container_width=True)
 
     st.caption("Font")
     row = st.columns(2 if selected_area != "Sermon Title" else 4)
@@ -1289,17 +1369,22 @@ def _options_from_entry(
     show_layout_guides: bool,
     selected_layout_area: str | None = None,
 ) -> TitleImageOptions:
-    title_box = resolve_title_box(
-        st.session_state.service_box,
-        st.session_state.speaker_box,
-        st.session_state.title_box,
-        auto_title_area=bool(st.session_state.get("auto_title_area", True)),
-        title_top_padding=int(
-            st.session_state.get("title_top_padding", DEFAULT_TITLE_TOP_PADDING)
-        ),
-        title_bottom_padding=int(
-            st.session_state.get("title_bottom_padding", DEFAULT_TITLE_BOTTOM_PADDING)
-        ),
+    effective = get_effective_layout_boxes(
+        {
+            "service_box": st.session_state.service_box,
+            "title_box": st.session_state.title_box,
+            "speaker_box": st.session_state.speaker_box,
+            "auto_title_box_between_service_and_speaker": st.session_state.get(
+                "auto_title_box_between_service_and_speaker",
+                st.session_state.get("auto_title_area", True),
+            ),
+            "title_side_padding": st.session_state.get(
+                "title_side_padding", DEFAULT_TITLE_SIDE_PADDING
+            ),
+            "title_vertical_gap": st.session_state.get(
+                "title_vertical_gap", DEFAULT_TITLE_VERTICAL_GAP
+            ),
+        }
     )
     return TitleImageOptions(
         day=entry["weekday"],
@@ -1312,9 +1397,9 @@ def _options_from_entry(
         service_font_path=_selected_font(service_font, font_labels, font_paths),
         title_font_path=_selected_font(title_font, font_labels, font_paths),
         speaker_font_path=_selected_font(speaker_font, font_labels, font_paths),
-        service_line_box=_text_box(st.session_state.service_box),
-        title_box=_text_box(title_box),
-        speaker_box=_text_box(st.session_state.speaker_box),
+        service_line_box=_text_box(effective["service_box"]),
+        title_box=_text_box(effective["title_box"]),
+        speaker_box=_text_box(effective["speaker_box"]),
         shadow_enabled=shadow_enabled,
         show_service_line=show_service_line,
         skew_enabled=skew_enabled,
@@ -1421,9 +1506,12 @@ def _current_preset_settings() -> dict:
         "selected_layout_area": st.session_state.selected_layout_area,
         "shadow_enabled": st.session_state.shadow_enabled,
         "skew_enabled": st.session_state.skew_enabled,
-        "auto_title_area": st.session_state.auto_title_area,
-        "title_top_padding": st.session_state.title_top_padding,
-        "title_bottom_padding": st.session_state.title_bottom_padding,
+        "auto_title_box_between_service_and_speaker": st.session_state.auto_title_box_between_service_and_speaker,
+        "title_side_padding": st.session_state.title_side_padding,
+        "title_vertical_gap": st.session_state.title_vertical_gap,
+        "auto_title_area": st.session_state.auto_title_box_between_service_and_speaker,
+        "title_top_padding": st.session_state.title_vertical_gap,
+        "title_bottom_padding": st.session_state.title_vertical_gap,
     }
 
 
@@ -1475,13 +1563,9 @@ def _apply_preset_to_session(
     st.session_state.selected_layout_area = settings["selected_layout_area"]
     st.session_state.shadow_enabled = settings["shadow_enabled"]
     st.session_state.skew_enabled = settings["skew_enabled"]
-    st.session_state.auto_title_area = bool(settings.get("auto_title_area", True))
-    st.session_state.title_top_padding = int(
-        settings.get("title_top_padding", DEFAULT_TITLE_TOP_PADDING)
-    )
-    st.session_state.title_bottom_padding = int(
-        settings.get("title_bottom_padding", DEFAULT_TITLE_BOTTOM_PADDING)
-    )
+    layout = resolve_auto_title_layout_settings(settings)
+    for key, value in layout.items():
+        st.session_state[key] = value
     for key, value in export_settings.items():
         st.session_state[key] = value
 

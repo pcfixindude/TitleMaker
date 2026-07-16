@@ -41,16 +41,17 @@ streamlit run app.py
 
 The sermon title is the hard part. By default:
 
-- **Auto title area between service and speaker** is ON.
-- Service and speaker lines stay centered in their fixed boxes.
-- The title fills the remaining vertical space (with padding).
-- Titles stay centered horizontally and vertically in that area.
+- **Auto-size title box between service and speaker** is ON for Monark presets.
+- Service and speaker lines stay in their boxes.
+- The title box spans nearly side-to-side with equal **Title side padding** (default 120px → width 1680).
+- Equal **Title vertical gap** above and below the title (default 40px).
+- Titles stay centered inside that wide box.
 - Short titles render large (up to font size **400**).
-- Longer titles wrap to 2, 3, or more lines and shrink as needed.
+- Longer titles use the full width before wrapping, then wrap to 2, 3, or more lines and shrink as needed.
 - Manual line breaks (`Enter`) are preserved.
 - Titles do not overflow into the service or speaker lines.
 
-Turn off auto title area under **Advanced: Layout** to set the title box Y/height manually.
+Turn off auto title layout under **Advanced: Layout → Title Auto Layout** to set the title box X/Y/width/height manually.
 
 ## Advanced: Service Log / Batch Tools
 
@@ -88,9 +89,11 @@ TitleMaker scans `fonts/` for `.ttf` / `.otf` files. Barlow Condensed ExtraBold 
 ## Advanced: Layout
 
 - Layout guides
-- Auto title area + padding from service / speaker
+- **Title Auto Layout**: auto-size title box between service and speaker, side padding, equal vertical gap
 - Visual nudge controls (position, size, font, skew)
 - Numeric X/Y/width/height, alignment, auto-size, line spacing
+
+When auto title layout is enabled, title X/Y/width/height are calculated and shown read-only. Font size, line spacing, and skew remain editable.
 
 ## Advanced: Export Targets
 
