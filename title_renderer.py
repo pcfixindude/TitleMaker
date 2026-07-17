@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
@@ -16,9 +17,19 @@ TEMPLATES_DIR = PROJECT_ROOT / "templates"
 EXPORTS_DIR = PROJECT_ROOT / "exports"
 PRESETS_DIR = PROJECT_ROOT / "presets"
 
+BARLOW_BOLD = FONTS_DIR / "BarlowCondensed-Bold.ttf"
 BARLOW_BOLD_ITALIC = FONTS_DIR / "BarlowCondensed-BoldItalic.ttf"
 BEBAS_FONT = FONTS_DIR / "BebasNeue-Regular.ttf"
 FONT_EXTENSIONS = {".ttf", ".otf"}
+
+# Backwards-compatible aliases (older names / app imports).
+BARLOW_BOLDITALIC = BARLOW_BOLD_ITALIC
+BARLOW_FONT = BARLOW_BOLD_ITALIC
+DEFAULT_FONT = BARLOW_BOLD_ITALIC
+FONT_PATH = BARLOW_BOLD_ITALIC
+DEFAULT_SERVICE_FONT = BARLOW_BOLD
+DEFAULT_TITLE_FONT = BARLOW_BOLD_ITALIC
+DEFAULT_SPEAKER_FONT = BARLOW_BOLD
 
 MAX_TITLE_FONT_SIZE = 520
 # Barlow glyph height is often shorter than the em-size; allow searching above the
@@ -28,7 +39,7 @@ MIN_TITLE_FONT_SIZE = 28
 MIN_SINGLE_LINE_FONT_SIZE = 28
 TITLE_LINE_SPACING = 0.95
 TEXT_COLOR_WHITE = "#FFFFFF"
-LAYOUT_DEFAULTS_VERSION = 5
+LAYOUT_DEFAULTS_VERSION = 6
 
 # Default boxes tuned for the open-Bible template (1920x1080).
 DEFAULT_SERVICE_BOX = {"x": 280, "y": 95, "width": 1360, "height": 90}
@@ -140,8 +151,45 @@ def export_filename(options: TitleImageOptions) -> str:
 
 
 def default_font_path(fonts: list[Path] | None = None) -> Path | None:
-    if BARLOW_BOLD_ITALIC.exists():
-        return BARLOW_BOLD_ITALIC
+    """Title / default display font (Bold Italic preferred)."""
+    return resolve_title_font_path(fonts=fonts)
+
+
+def resolve_service_font_path(
+    preferred: Path | None = None,
+    fonts: list[Path] | None = None,
+) -> Path | None:
+    """Service line font: preferred, then Bold, then Bold Italic, then fallbacks."""
+    chain = tuple(path for path in (preferred, BARLOW_BOLD, BARLOW_BOLD_ITALIC) if path)
+    return _resolve_font_path(preferred=chain, fonts=fonts)
+
+
+def resolve_speaker_font_path(
+    preferred: Path | None = None,
+    fonts: list[Path] | None = None,
+) -> Path | None:
+    """Speaker font: preferred, then Bold, then Bold Italic, then fallbacks."""
+    return resolve_service_font_path(preferred=preferred, fonts=fonts)
+
+
+def resolve_title_font_path(
+    preferred: Path | None = None,
+    fonts: list[Path] | None = None,
+) -> Path | None:
+    """Sermon title font: preferred, then Bold Italic, then Bold, then fallbacks."""
+    chain = tuple(path for path in (preferred, BARLOW_BOLD_ITALIC, BARLOW_BOLD) if path)
+    return _resolve_font_path(preferred=chain, fonts=fonts)
+
+
+def _resolve_font_path(
+    *,
+    preferred: tuple[Path, ...],
+    fonts: list[Path] | None = None,
+) -> Path | None:
+    for path in preferred:
+        candidate = Path(path)
+        if candidate.exists():
+            return candidate
     available = list_custom_fonts() if fonts is None else fonts
     if BEBAS_FONT in available:
         return BEBAS_FONT
@@ -183,13 +231,32 @@ def box_dict(box: TextBox) -> dict[str, int]:
     return {"x": box.x, "y": box.y, "width": box.width, "height": box.height}
 
 
-def text_box_from_dict(values: dict[str, int], *, max_font_size: int = MAX_TITLE_FONT_SIZE) -> TextBox:
+def text_box_from_dict(
+    values: dict[str, Any],
+    *,
+    max_font_size: int = MAX_TITLE_FONT_SIZE,
+    font_size: int | None = None,
+    auto_size: bool | None = None,
+) -> TextBox:
+    resolved_font = int(values["font_size"]) if values.get("font_size") is not None else font_size
+    if resolved_font is None:
+        resolved_font = 86
+    resolved_auto = (
+        bool(values["auto_size"])
+        if values.get("auto_size") is not None
+        else (True if auto_size is None else bool(auto_size))
+    )
+    resolved_max = int(values.get("max_font_size") or max_font_size)
+    if not resolved_auto:
+        resolved_max = max(resolved_max, resolved_font)
     return TextBox(
         x=int(values["x"]),
         y=int(values["y"]),
         width=max(1, int(values["width"])),
         height=max(1, int(values["height"])),
-        max_font_size=max_font_size,
+        font_size=resolved_font,
+        max_font_size=resolved_max,
+        auto_size=resolved_auto,
         line_spacing=TITLE_LINE_SPACING,
     )
 
@@ -210,9 +277,11 @@ def compute_title_box(title_vertical_offset: int = 0) -> dict[str, int]:
 
 def render_title_image(options: TitleImageOptions) -> Image.Image:
     ensure_project_dirs()
-    image = _load_background(options.background_path)
-    draw = ImageDraw.Draw(image)
-    font_path = default_font_path()
+    # RGBA so each text layer can be clipped to its box tile.
+    image = _load_background(options.background_path).convert("RGBA")
+    service_font = resolve_service_font_path(preferred=options.service_font_path)
+    title_font = resolve_title_font_path(preferred=options.title_font_path)
+    speaker_font = resolve_speaker_font_path(preferred=options.speaker_font_path)
     service_box, title_box, speaker_box = resolve_layout_boxes(options)
     fill = options.text_color or TEXT_COLOR_WHITE
     # Simplified app always renders white text with no shadow.
@@ -220,9 +289,9 @@ def render_title_image(options: TitleImageOptions) -> Image.Image:
 
     if options.show_service_line:
         render_text_in_box(
-            draw,
+            image,
             format_top_line(options),
-            font_path,
+            service_font,
             fill,
             service_box,
             mode="single",
@@ -230,9 +299,9 @@ def render_title_image(options: TitleImageOptions) -> Image.Image:
         )
 
     render_text_in_box(
-        draw,
+        image,
         format_title(options.sermon_title),
-        font_path,
+        title_font,
         fill,
         title_box,
         mode="title",
@@ -240,19 +309,26 @@ def render_title_image(options: TitleImageOptions) -> Image.Image:
     )
 
     render_text_in_box(
-        draw,
+        image,
         format_speaker(options.speaker_name),
-        font_path,
+        speaker_font,
         fill,
         speaker_box,
         mode="single",
         shadow_enabled=shadow_enabled,
     )
 
+    # Guides only when explicitly requested — never because a text area is selected.
     if options.show_bounding_boxes or options.show_layout_guides:
-        draw_preview_guides(draw, service_box, title_box, speaker_box)
+        draw_preview_guides(
+            ImageDraw.Draw(image),
+            service_box,
+            title_box,
+            speaker_box,
+            selected=normalize_selected_area(options.selected_layout_area),
+        )
 
-    return image
+    return image.convert("RGB")
 
 
 def save_title_image(options: TitleImageOptions) -> Path:
@@ -264,7 +340,7 @@ def save_title_image(options: TitleImageOptions) -> Path:
 
 
 def render_text_in_box(
-    draw: ImageDraw.ImageDraw,
+    image: Image.Image,
     text: str,
     font_path: Path | None,
     fill: str,
@@ -272,45 +348,76 @@ def render_text_in_box(
     *,
     mode: str,
     shadow_enabled: bool = False,
-) -> None:
+) -> Image.Image:
+    """Draw text centered in ``box``, clipped so ink cannot escape the rectangle."""
     if not text:
-        return
+        return image
+    if image.mode != "RGBA":
+        image = image.convert("RGBA")
+
+    # Small inset keeps italic edges from looking clipped by the guide.
+    fit_width = max(1, box.width - 4)
+    fit_height = max(1, box.height - 4)
     if mode == "title":
+        ceiling = (
+            max(box.font_size, 40)
+            if not box.auto_size
+            else max(box.max_font_size, MAX_TITLE_FONT_SIZE)
+        )
         font, lines, line_height, _, block_height = fit_title_max_2_lines(
             text,
-            max_width=box.width,
-            max_height=box.height,
+            max_width=fit_width,
+            max_height=fit_height,
             font_path=font_path,
-            max_font_size=max(box.max_font_size, MAX_TITLE_FONT_SIZE),
+            max_font_size=ceiling,
             line_spacing=box.line_spacing,
         )
     else:
+        ceiling = (
+            max(box.font_size, 20)
+            if not box.auto_size
+            else max(120, min(fit_height, 200))
+        )
         font, lines, line_height, _, block_height = fit_single_line_text(
             text,
-            max_width=box.width,
-            max_height=box.height,
+            max_width=fit_width,
+            max_height=fit_height,
             font_path=font_path,
+            max_font_size=ceiling,
         )
 
-    origin_x, origin_y = center_text_block_in_box(box, block_height)
+    tile = Image.new("RGBA", (max(1, box.width), max(1, box.height)), (0, 0, 0, 0))
+    tile_draw = ImageDraw.Draw(tile)
+    local_box = TextBox(0, 0, box.width, box.height)
+    origin_x, origin_y = center_text_block_in_box(local_box, block_height)
     y = origin_y
+    rgba = _fill_to_rgba(fill)
     for line in lines:
-        line_width = _text_width(draw, line, font)
+        line_width = _text_width(tile_draw, line, font)
         x = origin_x + max(0, (box.width - line_width) // 2)
-        # Use top-left anchoring so measured glyph height matches drawn ink.
-        # Pillow's default ascent anchor shifts large titles down and makes them
-        # look too small / off-center inside the title box.
+        # Top-left anchor matches measure_text_block / textbbox(..., anchor="lt").
         if shadow_enabled:
-            _draw_text_shadow(draw, (x, y), line, font, anchor="lt")
-        draw.text((x, y), line, font=font, fill=fill, anchor="lt")
+            _draw_text_shadow(tile_draw, (x, y), line, font, anchor="lt")
+        tile_draw.text((x, y), line, font=font, fill=rgba, anchor="lt")
         y += line_height
+
+    # Paste only the box tile — anything outside the box is impossible.
+    image.alpha_composite(tile, dest=(max(0, box.x), max(0, box.y)))
+    return image
 
 
 def center_text_block_in_box(box: TextBox, block_height: int) -> tuple[int, int]:
     """Return top-left origin so the text block is centered in the box."""
     x = box.x
-    y = box.y + max(0, (box.height - block_height) // 2)
+    y = box.y + max(0, (box.height - min(block_height, box.height)) // 2)
     return x, y
+
+
+def _fill_to_rgba(fill: str) -> tuple[int, int, int, int]:
+    value = (fill or TEXT_COLOR_WHITE).strip()
+    if value.startswith("#") and len(value) == 7:
+        return int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16), 255
+    return 255, 255, 255, 255
 
 
 def measure_text_block(
@@ -534,21 +641,48 @@ def choose_best_two_line_wrap(
     return _best_two_line_wrap(text, font, max_width, probe)
 
 
+def normalize_selected_area(value: str | None) -> str | None:
+    """Map UI labels / aliases to internal keys: service, title, speaker."""
+    if value is None:
+        return None
+    normalized = " ".join(str(value).strip().lower().replace("_", " ").split())
+    aliases = {
+        "service": "service",
+        "service line": "service",
+        "service_line": "service",
+        "title": "title",
+        "sermon title": "title",
+        "sermon_title": "title",
+        "speaker": "speaker",
+        "minister": "speaker",
+        "speaker / minister": "speaker",
+        "speaker/minister": "speaker",
+        "speaker minister": "speaker",
+    }
+    return aliases.get(normalized)
+
+
 def draw_preview_guides(
     draw: ImageDraw.ImageDraw,
     service_box: TextBox,
     title_box: TextBox,
     speaker_box: TextBox,
+    selected: str | None = None,
 ) -> None:
-    for box, color in (
-        (service_box, (255, 255, 255, 160)),
-        (title_box, (255, 220, 80, 190)),
-        (speaker_box, (255, 255, 255, 160)),
-    ):
+    """Draw layout guides. ``selected`` may be a label or key; unknown values are ignored."""
+    selected_key = normalize_selected_area(selected)
+    areas = (
+        ("service", service_box, (255, 255, 255, 160)),
+        ("title", title_box, (255, 220, 80, 190)),
+        ("speaker", speaker_box, (255, 255, 255, 160)),
+    )
+    for name, box, color in areas:
+        is_selected = selected_key == name
+        outline = (80, 220, 255, 255) if is_selected else color
         draw.rectangle(
             (box.x, box.y, box.x + box.width, box.y + box.height),
-            outline=color,
-            width=4,
+            outline=outline,
+            width=7 if is_selected else 4,
         )
 
 
@@ -734,6 +868,7 @@ def _load_font(
     candidates = [
         preferred_font,
         BARLOW_BOLD_ITALIC,
+        BARLOW_BOLD,
         BEBAS_FONT,
         Path("/Library/Fonts/Arial Bold.ttf"),
         Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
@@ -754,7 +889,7 @@ def _text_width(
     text: str,
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
 ) -> int:
-    bbox = draw.textbbox((0, 0), text, font=font)
+    bbox = draw.textbbox((0, 0), text, font=font, anchor="lt")
     return bbox[2] - bbox[0]
 
 
@@ -763,7 +898,7 @@ def _text_height(
     text: str,
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
 ) -> int:
-    bbox = draw.textbbox((0, 0), text, font=font)
+    bbox = draw.textbbox((0, 0), text, font=font, anchor="lt")
     return max(1, bbox[3] - bbox[1])
 
 

@@ -142,7 +142,7 @@ class SimplifiedTitleFitTest(unittest.TestCase):
         self.assertLessEqual(y + block_height, box.y + box.height)
 
     def test_short_title_ink_fills_title_box_when_rendered(self) -> None:
-        """Large short titles must draw inside the title box (lt anchor)."""
+        """Large short titles must draw inside the title box (clipped tile)."""
         with tempfile.TemporaryDirectory() as temp_dir:
             bg = Path(temp_dir) / "black.png"
             Image.new("RGB", CANVAS_SIZE, (0, 0, 0)).save(bg)
@@ -164,20 +164,25 @@ class SimplifiedTitleFitTest(unittest.TestCase):
         title = DEFAULT_TITLE_BOX
         top = title["y"]
         bottom = title["y"] + title["height"]
+        left = title["x"]
+        right = title["x"] + title["width"]
         ink_rows = [
             y
             for y in range(top, bottom)
-            if any(image.getpixel((x, y))[0] > 200 for x in range(title["x"], title["x"] + title["width"], 8))
+            if any(image.getpixel((x, y))[0] > 200 for x in range(left, right, 8))
         ]
         self.assertTrue(ink_rows)
         ink_span = max(ink_rows) - min(ink_rows) + 1
         self.assertGreaterEqual(ink_span / title["height"], 0.85)
-        # Must not spill into the speaker band.
-        spill = any(
-            image.getpixel((title["x"] + title["width"] // 2, y))[0] > 200
-            for y in range(bottom + 1, DEFAULT_SPEAKER_BOX["y"])
-        )
-        self.assertFalse(spill)
+        # Clipped tile: no bright title ink outside the title rectangle.
+        outside = []
+        for y in range(CANVAS_SIZE[1]):
+            for x in range(0, CANVAS_SIZE[0], 6):
+                if left <= x < right and top <= y < bottom:
+                    continue
+                if image.getpixel((x, y))[0] > 200:
+                    outside.append((x, y))
+        self.assertEqual(outside, [])
 
     def test_title_font_can_grow_up_to_max(self) -> None:
         size = fit_title_font_size_for_test(
@@ -349,12 +354,13 @@ class SimplifiedAppSafetyTest(unittest.TestCase):
         widget_keys = {
             "simple_title_input",
             "simple_speaker_input",
-            "simple_day_select",
             "simple_service_select",
             "simple_date_input",
             "simple_background_select",
             "simple_show_boxes",
         }
+        self.assertIn('strftime("%A")', source)
+        self.assertNotIn("simple_day_select", source)
         for key in widget_keys:
             self.assertIn(f'key="{key}"', source)
 

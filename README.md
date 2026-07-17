@@ -22,8 +22,27 @@ streamlit run app.py
 
 ## Text and layout
 
-- Font everywhere: **`fonts/BarlowCondensed-BoldItalic.ttf`**
-- All text is **white** with **no shadow**
+### Font Choices
+
+Open the **Font Choices** expander to pick a font for each text section:
+
+- Service line font
+- Sermon title font
+- Speaker / Minister font
+
+Fonts are discovered from:
+
+- the project `fonts/` folder (`.ttf` / `.otf`)
+- installed system font folders (macOS / Windows / Linux)
+
+Defaults:
+
+- Service / speaker → `BarlowCondensed-Bold.ttf`
+- Title → `BarlowCondensed-BoldItalic.ttf`
+
+If a saved font is missing, the app falls back safely and keeps rendering.
+
+All text is **white** with **no shadow**.
 - Service line and speaker stay on **one line** and auto-shrink to fit their boxes
 - Sermon title auto-fits inside the **title box**:
   - Short titles grow aggressively to fill the title area height
@@ -41,7 +60,17 @@ streamlit run app.py
 
 **Reset boxes to defaults** restores these values.
 
-Use **Show bounding boxes** for preview guides only. Export stays clean.
+### Preview editor
+
+Around the preview:
+
+- **Select** Service line / Sermon title / Speaker
+- **Up / Down** move the selected box (kept centered horizontally)
+- **+ / −** scale the selected text font (box height adjusts to fit)
+- **4 preset buttons** on the left load saved layouts
+- **Save as Preset** stores the current boxes/fonts into a chosen slot (1–4)
+
+Selected text is highlighted in the preview guides. Export stays clean (no guides).
 
 ## Export
 

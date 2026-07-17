@@ -1,0 +1,60 @@
+{
+  "slots": {
+    "1": {
+      "name": "Preset 1",
+      "service": {
+        "x": 280,
+        "y": 98,
+        "width": 1360,
+        "height": 85,
+        "font_size": 74,
+        "auto_size": false
+      },
+      "title": {
+        "x": 30,
+        "y": 216,
+        "width": 1860,
+        "height": 418,
+        "font_size": 364,
+        "auto_size": false
+      },
+      "speaker": {
+        "x": 280,
+        "y": 671,
+        "width": 1360,
+        "height": 78,
+        "font_size": 68,
+        "auto_size": false
+      }
+    },
+    "2": {
+      "name": "Preset 2",
+      "service": {
+        "x": 280,
+        "y": 98,
+        "width": 1360,
+        "height": 85,
+        "font_size": 74,
+        "auto_size": false
+      },
+      "title": {
+        "x": 30,
+        "y": 216,
+        "width": 1860,
+        "height": 418,
+        "font_size": 364,
+        "auto_size": false
+      },
+      "speaker": {
+        "x": 280,
+        "y": 671,
+        "width": 1360,
+        "height": 78,
+        "font_size": 68,
+        "auto_size": false
+      }
+    },
+    "3": null,
+    "4": null
+  }
+}
