@@ -8,11 +8,15 @@ from pathlib import Path
 
 import streamlit as st
 
+from font_config import (
+    FontConfig,
+    default_font_config_for_role,
+    font_config_from_dict,
+)
 from font_discovery import (
     FontChoice,
     default_font_id_for_role,
     discover_fonts,
-    resolve_selected_font,
 )
 from monark_schedule import find_current_service_entry, get_monark_service_entries
 from simple_presets import (
@@ -37,7 +41,6 @@ from title_renderer import (
     list_template_backgrounds,
     normalize_selected_area,
     render_title_image,
-    service_code,
     text_box_from_dict,
 )
 
@@ -67,10 +70,20 @@ FONT_STEP = 12
 MIN_FONT = 24
 MAX_FONT = 700
 FONT_SETTINGS_PATH = PROJECT_ROOT / "data" / "simple_font_settings.json"
-FONT_SELECT_KEYS = {
-    "service": "simple_service_font_select",
-    "title": "simple_title_font_select",
-    "speaker": "simple_speaker_font_select",
+FONT_CONFIG_STATE_KEYS = {
+    "service": "simple_service_font_config",
+    "title": "simple_title_font_config",
+    "speaker": "simple_speaker_font_config",
+}
+FONT_DIALOG_TITLES = {
+    "service": "Configure Service Line Font",
+    "title": "Configure Sermon Title Font",
+    "speaker": "Configure Minister / Speaker Font",
+}
+FONT_SECTION_LABELS = {
+    "service": "Service Line",
+    "title": "Sermon Title",
+    "speaker": "Minister / Speaker",
 }
 
 
@@ -157,35 +170,9 @@ def main() -> None:
         )
 
         catalog = _font_catalog()
-        font_ids = [choice.font_id for choice in catalog]
-        labels_by_id = {choice.font_id: choice.label for choice in catalog}
-        with st.expander("Font Choices", expanded=False):
-            st.caption(
-                "Fonts from the project fonts/ folder and installed system fonts."
-            )
-            for role, label in (
-                ("service", "Service Line Font"),
-                ("title", "Sermon Title Font"),
-                ("speaker", "Speaker / Minister Font"),
-            ):
-                key = FONT_SELECT_KEYS[role]
-                if st.session_state.get(key) not in font_ids and font_ids:
-                    fallback = default_font_id_for_role(role)
-                    st.session_state[key] = (
-                        fallback if fallback in font_ids else font_ids[0]
-                    )
-                    st.warning(
-                        f"{label}: saved font missing — using "
-                        f"{labels_by_id.get(st.session_state[key], 'default')}."
-                    )
-                st.selectbox(
-                    label,
-                    options=font_ids,
-                    format_func=lambda font_id, mapping=labels_by_id: mapping.get(
-                        font_id, font_id
-                    ),
-                    key=key,
-                )
+        _render_font_settings_panel(catalog)
+        _maybe_open_font_dialog(catalog)
+        _persist_font_settings()
 
         with st.expander("Bounding box numbers", expanded=False):
             if st.button("Reset boxes to defaults", width="stretch"):
@@ -195,9 +182,7 @@ def main() -> None:
             _box_controls("Sermon Title Box", "title", "Title")
             _box_controls("Speaker / Minister Box", "speaker", "Speaker")
 
-        selected_fonts = _selected_font_paths(catalog)
-        _persist_font_settings()
-
+        font_configs = _current_font_configs()
         st.session_state.simple_render_inputs = {
             "day": day,
             "service": service,
@@ -208,9 +193,9 @@ def main() -> None:
             "background_labels": background_labels,
             "templates": templates,
             "show_boxes": show_boxes,
-            "service_font_path": selected_fonts["service"],
-            "title_font_path": selected_fonts["title"],
-            "speaker_font_path": selected_fonts["speaker"],
+            "service_font_config": font_configs["service"],
+            "title_font_config": font_configs["title"],
+            "speaker_font_config": font_configs["speaker"],
         }
 
         export_options = _build_options(
@@ -230,10 +215,8 @@ def main() -> None:
             st.caption(f"Last export: {st.session_state.simple_last_export}")
 
         st.caption(
-            "Fonts: service/speaker "
-            f"{(selected_fonts['service'] or Path('fallback')).name}; "
-            f"title {(selected_fonts['title'] or Path('fallback')).name}; "
-            "white text; no shadow; export 1920×1080"
+            "Fonts configured per section · white by default · "
+            "effects off unless enabled · export 1920×1080"
         )
 
     with right:
@@ -389,11 +372,12 @@ def _ensure_simple_defaults() -> None:
     st.session_state.setdefault("simple_selected_area", "title")
     st.session_state.setdefault("simple_preset_save_slot", 1)
     saved_fonts = _load_font_settings()
-    for role, key in FONT_SELECT_KEYS.items():
-        st.session_state.setdefault(
-            key,
-            saved_fonts.get(f"{role}_font_path") or default_font_id_for_role(role),
-        )
+    for role, key in FONT_CONFIG_STATE_KEYS.items():
+        if key not in st.session_state:
+            raw = saved_fonts.get(f"{role}_font_config")
+            if raw is None and saved_fonts.get(f"{role}_font_path"):
+                raw = saved_fonts[f"{role}_font_path"]
+            st.session_state[key] = font_config_from_dict(raw, role=role).to_dict()
     if st.session_state.get("simple_layout_version") != LAYOUT_DEFAULTS_VERSION:
         _reset_box_defaults()
         st.session_state.simple_layout_version = LAYOUT_DEFAULTS_VERSION
@@ -470,20 +454,19 @@ def _scale_selected_font(delta: int) -> None:
 
 
 def _current_preset_payload(name: str) -> dict:
+    configs = _current_font_configs()
     return {
         "name": name,
         "service": _read_box("service"),
         "title": _read_box("title"),
         "speaker": _read_box("speaker"),
-        "service_font_path": st.session_state.get(
-            FONT_SELECT_KEYS["service"], default_font_id_for_role("service")
-        ),
-        "title_font_path": st.session_state.get(
-            FONT_SELECT_KEYS["title"], default_font_id_for_role("title")
-        ),
-        "speaker_font_path": st.session_state.get(
-            FONT_SELECT_KEYS["speaker"], default_font_id_for_role("speaker")
-        ),
+        "service_font_config": configs["service"].to_dict(),
+        "title_font_config": configs["title"].to_dict(),
+        "speaker_font_config": configs["speaker"].to_dict(),
+        "service_font_path": configs["service"].font_path,
+        "title_font_path": configs["title"].font_path,
+        "speaker_font_path": configs["speaker"].font_path,
+        "background_label": st.session_state.get("simple_background_select"),
     }
 
 
@@ -502,15 +485,12 @@ def _apply_preset_slot(slot: int) -> None:
             box.get("font_size", DEFAULT_FONT_SIZES[prefix])
         )
         st.session_state[f"simple_{prefix}_auto_size"] = bool(box.get("auto_size", True))
-    st.session_state[FONT_SELECT_KEYS["service"]] = str(
-        preset.get("service_font_path") or default_font_id_for_role("service")
-    )
-    st.session_state[FONT_SELECT_KEYS["title"]] = str(
-        preset.get("title_font_path") or default_font_id_for_role("title")
-    )
-    st.session_state[FONT_SELECT_KEYS["speaker"]] = str(
-        preset.get("speaker_font_path") or default_font_id_for_role("speaker")
-    )
+        st.session_state[FONT_CONFIG_STATE_KEYS[prefix]] = font_config_from_dict(
+            preset.get(f"{prefix}_font_config") or preset.get(f"{prefix}_font_path"),
+            role=prefix,
+        ).to_dict()
+    if preset.get("background_label"):
+        st.session_state.simple_background_select = str(preset["background_label"])
     st.session_state.simple_preset_message = f"Loaded preset slot {slot}."
 
 
@@ -520,58 +500,341 @@ def _save_selected_preset_slot() -> None:
     st.session_state.simple_preset_message = f"Saved to slot {slot}."
 
 
-def _selected_font_paths(catalog: list[FontChoice]) -> dict[str, Path | None]:
+def _current_font_configs() -> dict[str, FontConfig]:
     return {
-        "service": resolve_selected_font(
-            st.session_state.get(FONT_SELECT_KEYS["service"]),
-            role="service",
-            catalog=catalog,
-        ),
-        "title": resolve_selected_font(
-            st.session_state.get(FONT_SELECT_KEYS["title"]),
-            role="title",
-            catalog=catalog,
-        ),
-        "speaker": resolve_selected_font(
-            st.session_state.get(FONT_SELECT_KEYS["speaker"]),
-            role="speaker",
-            catalog=catalog,
-        ),
+        role: font_config_from_dict(
+            st.session_state.get(FONT_CONFIG_STATE_KEYS[role]), role=role
+        )
+        for role in AREA_KEYS
     }
 
 
-def _load_font_settings() -> dict[str, str]:
+def _font_display_name(cfg: FontConfig, catalog: list[FontChoice]) -> str:
+    by_id = {choice.font_id: choice.label for choice in catalog}
+    if cfg.font_path in by_id:
+        return by_id[cfg.font_path]
+    return Path(cfg.font_path).name or cfg.font_path
+
+
+def _render_font_settings_panel(catalog: list[FontChoice]) -> None:
+    with st.expander("Font Settings", expanded=False):
+        st.caption(
+            "Each section has its own font file and optional fancy effects. "
+            "Defaults use the font file as-is (no artificial effects)."
+        )
+        for role in AREA_KEYS:
+            cfg = font_config_from_dict(
+                st.session_state.get(FONT_CONFIG_STATE_KEYS[role]), role=role
+            )
+            st.markdown(f"**{FONT_SECTION_LABELS[role]}**")
+            st.caption(
+                f"{_font_display_name(cfg, catalog)} · {cfg.effects_summary()}"
+            )
+            cols = st.columns([1.4, 1])
+            if cols[0].button(
+                f"Configure {FONT_SECTION_LABELS[role]} Font",
+                key=f"open_{role}_font_dialog",
+                width="stretch",
+            ):
+                _seed_font_dialog_widgets(role, cfg, catalog)
+                st.session_state.simple_font_dialog_role = role
+                st.rerun()
+            if cols[1].button(
+                "Reset",
+                key=f"reset_{role}_font_inline",
+                width="stretch",
+                help=f"Reset {FONT_SECTION_LABELS[role]} font to default",
+            ):
+                st.session_state[FONT_CONFIG_STATE_KEYS[role]] = (
+                    default_font_config_for_role(role).to_dict()
+                )
+                st.rerun()
+        if st.button(
+            "Reset All Font Settings to Defaults",
+            key="reset_all_font_settings",
+            width="stretch",
+        ):
+            for role in AREA_KEYS:
+                st.session_state[FONT_CONFIG_STATE_KEYS[role]] = (
+                    default_font_config_for_role(role).to_dict()
+                )
+            st.rerun()
+
+
+def _maybe_open_font_dialog(catalog: list[FontChoice]) -> None:
+    role = st.session_state.get("simple_font_dialog_role")
+    if role not in AREA_KEYS:
+        return
+    if hasattr(st, "dialog"):
+        _FONT_DIALOGS[role](catalog)
+    else:
+        with st.expander(FONT_DIALOG_TITLES[role], expanded=True):
+            _font_config_dialog_body(role, catalog)
+
+
+def _seed_font_dialog_widgets(
+    role: str, cfg: FontConfig, catalog: list[FontChoice]
+) -> None:
+    """Set dialog widget keys before widgets are created (safe for Streamlit)."""
+    font_ids = [choice.font_id for choice in catalog]
+    font_id = cfg.font_path
+    if font_id not in font_ids:
+        fallback = default_font_id_for_role(role)
+        font_id = fallback if fallback in font_ids else (font_ids[0] if font_ids else font_id)
+    st.session_state[f"{role}_font_dialog_font_select"] = font_id
+    st.session_state[f"{role}_font_dialog_search"] = ""
+    st.session_state[f"{role}_font_dialog_text_color"] = cfg.text_color or "#FFFFFF"
+    st.session_state[f"{role}_font_dialog_default_style"] = bool(
+        cfg.use_font_file_default_style_only
+    )
+    st.session_state[f"{role}_font_dialog_artificial_bold"] = bool(cfg.artificial_bold)
+    st.session_state[f"{role}_font_dialog_artificial_italic"] = bool(cfg.artificial_italic)
+    st.session_state[f"{role}_font_dialog_skew_angle"] = float(cfg.skew_angle)
+    st.session_state[f"{role}_font_dialog_underline"] = bool(cfg.underline)
+    st.session_state[f"{role}_font_dialog_letter_spacing"] = float(cfg.letter_spacing)
+    st.session_state[f"{role}_font_shadow_enabled"] = bool(cfg.shadow_enabled)
+    st.session_state[f"{role}_font_shadow_color"] = cfg.shadow_color or "#000000"
+    st.session_state[f"{role}_font_shadow_offset_x"] = int(cfg.shadow_offset_x)
+    st.session_state[f"{role}_font_shadow_offset_y"] = int(cfg.shadow_offset_y)
+    st.session_state[f"{role}_font_outline_enabled"] = bool(cfg.outline_enabled)
+    st.session_state[f"{role}_font_outline_color"] = cfg.outline_color or "#000000"
+    st.session_state[f"{role}_font_outline_width"] = int(cfg.outline_width)
+
+
+def _read_font_dialog_config(role: str) -> FontConfig:
+    return FontConfig(
+        font_path=str(
+            st.session_state.get(f"{role}_font_dialog_font_select")
+            or default_font_id_for_role(role)
+        ),
+        text_color=str(
+            st.session_state.get(f"{role}_font_dialog_text_color") or "#FFFFFF"
+        ),
+        use_font_file_default_style_only=bool(
+            st.session_state.get(f"{role}_font_dialog_default_style", True)
+        ),
+        artificial_bold=bool(
+            st.session_state.get(f"{role}_font_dialog_artificial_bold", False)
+        ),
+        artificial_italic=bool(
+            st.session_state.get(f"{role}_font_dialog_artificial_italic", False)
+        ),
+        skew_angle=float(st.session_state.get(f"{role}_font_dialog_skew_angle") or 0),
+        underline=bool(st.session_state.get(f"{role}_font_dialog_underline", False)),
+        letter_spacing=float(
+            st.session_state.get(f"{role}_font_dialog_letter_spacing") or 0
+        ),
+        shadow_enabled=bool(st.session_state.get(f"{role}_font_shadow_enabled", False)),
+        shadow_color=str(st.session_state.get(f"{role}_font_shadow_color") or "#000000"),
+        shadow_offset_x=int(st.session_state.get(f"{role}_font_shadow_offset_x") or 0),
+        shadow_offset_y=int(st.session_state.get(f"{role}_font_shadow_offset_y") or 0),
+        outline_enabled=bool(st.session_state.get(f"{role}_font_outline_enabled", False)),
+        outline_color=str(
+            st.session_state.get(f"{role}_font_outline_color") or "#000000"
+        ),
+        outline_width=int(st.session_state.get(f"{role}_font_outline_width") or 0),
+    )
+
+
+def _font_config_dialog_body(role: str, catalog: list[FontChoice]) -> None:
+    if st.session_state.pop(f"{role}_font_dialog_needs_seed", False):
+        _seed_font_dialog_widgets(
+            role,
+            font_config_from_dict(
+                st.session_state.get(FONT_CONFIG_STATE_KEYS[role]), role=role
+            ),
+            catalog,
+        )
+    labels_by_id = {choice.font_id: choice.label for choice in catalog}
+    search = st.text_input(
+        "Search fonts",
+        key=f"{role}_font_dialog_search",
+        placeholder="Filter by name…",
+    )
+    query = (search or "").strip().lower()
+    font_ids = [
+        choice.font_id
+        for choice in catalog
+        if not query or query in choice.label.lower() or query in choice.font_id.lower()
+    ]
+    if not font_ids and catalog:
+        font_ids = [choice.font_id for choice in catalog]
+    current = st.session_state.get(f"{role}_font_dialog_font_select")
+    if current not in font_ids and font_ids:
+        st.session_state[f"{role}_font_dialog_font_select"] = font_ids[0]
+
+    st.selectbox(
+        "Font",
+        options=font_ids,
+        format_func=lambda font_id, mapping=labels_by_id: mapping.get(font_id, font_id),
+        key=f"{role}_font_dialog_font_select",
+    )
+    st.color_picker("Text color", key=f"{role}_font_dialog_text_color")
+    default_only = st.checkbox(
+        "Use font file default style only",
+        key=f"{role}_font_dialog_default_style",
+        help="When checked, fancy effects are ignored and the font file is used as-is.",
+    )
+
+    st.markdown("**Fancy options**")
+    fancy = st.container()
+    with fancy:
+        st.checkbox(
+            "Artificial bold",
+            key=f"{role}_font_dialog_artificial_bold",
+            disabled=default_only,
+        )
+        st.checkbox(
+            "Artificial italic",
+            key=f"{role}_font_dialog_artificial_italic",
+            disabled=default_only,
+        )
+        st.slider(
+            "Skew / slant angle",
+            min_value=-25.0,
+            max_value=25.0,
+            step=0.5,
+            key=f"{role}_font_dialog_skew_angle",
+            disabled=default_only,
+            help="Positive slants right; negative slants left.",
+        )
+        st.checkbox(
+            "Underline",
+            key=f"{role}_font_dialog_underline",
+            disabled=default_only,
+        )
+        st.slider(
+            "Letter spacing",
+            min_value=-10.0,
+            max_value=50.0,
+            step=0.5,
+            key=f"{role}_font_dialog_letter_spacing",
+            disabled=default_only,
+        )
+
+        st.markdown("**Shadow**")
+        st.checkbox(
+            "Enable shadow",
+            key=f"{role}_font_shadow_enabled",
+            disabled=default_only,
+        )
+        st.color_picker(
+            "Shadow color",
+            key=f"{role}_font_shadow_color",
+            disabled=default_only,
+        )
+        c1, c2 = st.columns(2)
+        c1.number_input(
+            "Shadow X",
+            min_value=-40,
+            max_value=40,
+            step=1,
+            key=f"{role}_font_shadow_offset_x",
+            disabled=default_only,
+        )
+        c2.number_input(
+            "Shadow Y",
+            min_value=-40,
+            max_value=40,
+            step=1,
+            key=f"{role}_font_shadow_offset_y",
+            disabled=default_only,
+        )
+
+        st.markdown("**Outline / stroke**")
+        st.checkbox(
+            "Enable outline",
+            key=f"{role}_font_outline_enabled",
+            disabled=default_only,
+        )
+        st.color_picker(
+            "Outline color",
+            key=f"{role}_font_outline_color",
+            disabled=default_only,
+        )
+        st.slider(
+            "Outline width",
+            min_value=0,
+            max_value=20,
+            step=1,
+            key=f"{role}_font_outline_width",
+            disabled=default_only,
+        )
+
+    b1, b2, b3 = st.columns(3)
+    if b1.button("Apply", key=f"{role}_font_dialog_apply", type="primary", width="stretch"):
+        st.session_state[FONT_CONFIG_STATE_KEYS[role]] = _read_font_dialog_config(
+            role
+        ).to_dict()
+        st.session_state.simple_font_dialog_role = None
+        st.rerun()
+    if b2.button("Cancel", key=f"{role}_font_dialog_cancel", width="stretch"):
+        st.session_state.simple_font_dialog_role = None
+        st.rerun()
+    if b3.button(
+        "Reset this section to default",
+        key=f"{role}_font_dialog_reset",
+        width="stretch",
+    ):
+        st.session_state[FONT_CONFIG_STATE_KEYS[role]] = default_font_config_for_role(
+            role
+        ).to_dict()
+        st.session_state[f"{role}_font_dialog_needs_seed"] = True
+        st.rerun()
+
+
+if hasattr(st, "dialog"):
+
+    @st.dialog("Configure Service Line Font", width="large")
+    def _service_font_dialog(catalog: list[FontChoice]) -> None:
+        _font_config_dialog_body("service", catalog)
+
+    @st.dialog("Configure Sermon Title Font", width="large")
+    def _title_font_dialog(catalog: list[FontChoice]) -> None:
+        _font_config_dialog_body("title", catalog)
+
+    @st.dialog("Configure Minister / Speaker Font", width="large")
+    def _speaker_font_dialog(catalog: list[FontChoice]) -> None:
+        _font_config_dialog_body("speaker", catalog)
+
+    _FONT_DIALOGS = {
+        "service": _service_font_dialog,
+        "title": _title_font_dialog,
+        "speaker": _speaker_font_dialog,
+    }
+
+else:
+
+    def _fallback_font_dialog(catalog: list[FontChoice], *, role: str) -> None:
+        _font_config_dialog_body(role, catalog)
+
+    _FONT_DIALOGS = {
+        "service": lambda catalog: _fallback_font_dialog(catalog, role="service"),
+        "title": lambda catalog: _fallback_font_dialog(catalog, role="title"),
+        "speaker": lambda catalog: _fallback_font_dialog(catalog, role="speaker"),
+    }
+
+
+def _load_font_settings() -> dict:
     if not FONT_SETTINGS_PATH.exists():
         return {}
     try:
         payload = json.loads(FONT_SETTINGS_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    if not isinstance(payload, dict):
-        return {}
-    return {
-        key: str(payload[key])
-        for key in (
-            "service_font_path",
-            "title_font_path",
-            "speaker_font_path",
-        )
-        if payload.get(key)
-    }
+    return payload if isinstance(payload, dict) else {}
 
 
 def _persist_font_settings() -> None:
     FONT_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    configs = _current_font_configs()
     payload = {
-        "service_font_path": st.session_state.get(
-            FONT_SELECT_KEYS["service"], default_font_id_for_role("service")
-        ),
-        "title_font_path": st.session_state.get(
-            FONT_SELECT_KEYS["title"], default_font_id_for_role("title")
-        ),
-        "speaker_font_path": st.session_state.get(
-            FONT_SELECT_KEYS["speaker"], default_font_id_for_role("speaker")
-        ),
+        "service_font_config": configs["service"].to_dict(),
+        "title_font_config": configs["title"].to_dict(),
+        "speaker_font_config": configs["speaker"].to_dict(),
+        "service_font_path": configs["service"].font_path,
+        "title_font_path": configs["title"].font_path,
+        "speaker_font_path": configs["speaker"].font_path,
     }
     FONT_SETTINGS_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
@@ -588,6 +851,9 @@ def _build_options(
     templates: list[Path],
     show_boxes: bool,
     selected_area: str | None,
+    service_font_config: FontConfig | None = None,
+    title_font_config: FontConfig | None = None,
+    speaker_font_config: FontConfig | None = None,
     service_font_path: Path | None = None,
     title_font_path: Path | None = None,
     speaker_font_path: Path | None = None,
@@ -609,6 +875,9 @@ def _build_options(
         selected_layout_area=normalize_selected_area(selected_area),
         shadow_enabled=False,
         text_color="#FFFFFF",
+        service_font_config=service_font_config,
+        title_font_config=title_font_config,
+        speaker_font_config=speaker_font_config,
         service_font_path=service_font_path,
         title_font_path=title_font_path,
         speaker_font_path=speaker_font_path,

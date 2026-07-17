@@ -52,11 +52,11 @@ class DualFontResolveTest(unittest.TestCase):
         source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(
             encoding="utf-8"
         )
-        self.assertIn("Font Choices", source)
-        self.assertIn("simple_service_font_select", source)
-        self.assertIn("simple_title_font_select", source)
-        self.assertIn("simple_speaker_font_select", source)
-        self.assertIn("resolve_selected_font", source)
+        self.assertIn("Font Settings", source)
+        self.assertIn("simple_service_font_config", source)
+        self.assertIn("simple_title_font_config", source)
+        self.assertIn("simple_speaker_font_config", source)
+        self.assertIn("Configure Service Line Font", source)
 
     def test_service_font_resolves_to_barlow_bold(self) -> None:
         if not BARLOW_BOLD.exists():

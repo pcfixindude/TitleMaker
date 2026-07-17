@@ -4,6 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from font_config import (
+    DEFAULT_SERVICE_FONT_PATH,
+    DEFAULT_SPEAKER_FONT_PATH,
+    DEFAULT_TITLE_FONT_PATH,
+    default_font_config_for_role,
+    font_config_from_dict,
+)
 from font_discovery import (
     BARLOW_BOLD_ITALIC_NAME,
     BARLOW_BOLD_NAME,
@@ -98,24 +105,49 @@ def _valid_preset(entry: dict[str, Any]) -> bool:
 
 
 def _normalize_preset(entry: dict[str, Any]) -> dict[str, Any]:
+    service_cfg = _preset_font_config(entry, "service")
+    title_cfg = _preset_font_config(entry, "title")
+    speaker_cfg = _preset_font_config(entry, "speaker")
     return {
         "name": str(entry.get("name") or "Preset"),
         "service": dict(entry["service"]),
         "title": dict(entry["title"]),
         "speaker": dict(entry["speaker"]),
+        "service_font_config": service_cfg,
+        "title_font_config": title_cfg,
+        "speaker_font_config": speaker_cfg,
+        # Legacy path fields kept for older readers / tests.
         "service_font_path": str(
-            entry.get("service_font_path")
+            service_cfg.get("font_path")
+            or entry.get("service_font_path")
             or DEFAULT_FONT_IDS["service_font_path"]
+            or DEFAULT_SERVICE_FONT_PATH
             or BARLOW_BOLD_NAME
         ),
         "title_font_path": str(
-            entry.get("title_font_path")
+            title_cfg.get("font_path")
+            or entry.get("title_font_path")
             or DEFAULT_FONT_IDS["title_font_path"]
+            or DEFAULT_TITLE_FONT_PATH
             or BARLOW_BOLD_ITALIC_NAME
         ),
         "speaker_font_path": str(
-            entry.get("speaker_font_path")
+            speaker_cfg.get("font_path")
+            or entry.get("speaker_font_path")
             or DEFAULT_FONT_IDS["speaker_font_path"]
+            or DEFAULT_SPEAKER_FONT_PATH
             or BARLOW_BOLD_NAME
         ),
+        "background_label": entry.get("background_label"),
     }
+
+
+def _preset_font_config(entry: dict[str, Any], role: str) -> dict[str, Any]:
+    key = f"{role}_font_config"
+    if isinstance(entry.get(key), dict):
+        return font_config_from_dict(entry[key], role=role).to_dict()
+    # Migrate legacy path-only presets.
+    legacy_path = entry.get(f"{role}_font_path")
+    if legacy_path:
+        return font_config_from_dict(str(legacy_path), role=role).to_dict()
+    return default_font_config_for_role(role).to_dict()

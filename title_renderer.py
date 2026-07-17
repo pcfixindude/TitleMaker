@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -7,6 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+from font_config import (
+    FontConfig,
+    default_service_font_config,
+    default_title_font_config,
+    font_config_from_dict,
+)
 
 
 CANVAS_SIZE = (1920, 1080)
@@ -88,6 +96,9 @@ class TitleImageOptions:
     service_font_path: Path | None = None
     title_font_path: Path | None = None
     speaker_font_path: Path | None = None
+    service_font_config: FontConfig | None = None
+    title_font_config: FontConfig | None = None
+    speaker_font_config: FontConfig | None = None
     auto_size: bool = True
     title_font_size: int = MAX_TITLE_FONT_SIZE
     shadow_enabled: bool = False
@@ -275,47 +286,79 @@ def compute_title_box(title_vertical_offset: int = 0) -> dict[str, int]:
     return box
 
 
+def resolve_section_font_config(
+    config: FontConfig | dict[str, Any] | None,
+    preferred_path: Path | None,
+    *,
+    role: str,
+) -> FontConfig:
+    """Build an effective FontConfig from explicit config and/or legacy path fields."""
+    if isinstance(config, FontConfig):
+        cfg = font_config_from_dict(config.to_dict(), role=role)
+    elif isinstance(config, dict):
+        cfg = font_config_from_dict(config, role=role)
+    else:
+        cfg = font_config_from_dict(None, role=role)
+        if preferred_path is not None:
+            try:
+                rel = Path(preferred_path).resolve().relative_to(PROJECT_ROOT)
+                cfg.font_path = str(rel).replace("\\", "/")
+            except Exception:
+                cfg.font_path = str(preferred_path)
+    resolver = {
+        "service": resolve_service_font_path,
+        "title": resolve_title_font_path,
+        "speaker": resolve_speaker_font_path,
+    }.get(role, resolve_service_font_path)
+    resolved = resolver(preferred=cfg.resolved_font_path())
+    if resolved is not None:
+        try:
+            cfg.font_path = str(resolved.resolve().relative_to(PROJECT_ROOT)).replace(
+                "\\", "/"
+            )
+        except ValueError:
+            cfg.font_path = str(resolved)
+    return cfg
+
+
 def render_title_image(options: TitleImageOptions) -> Image.Image:
     ensure_project_dirs()
     # RGBA so each text layer can be clipped to its box tile.
     image = _load_background(options.background_path).convert("RGBA")
-    service_font = resolve_service_font_path(preferred=options.service_font_path)
-    title_font = resolve_title_font_path(preferred=options.title_font_path)
-    speaker_font = resolve_speaker_font_path(preferred=options.speaker_font_path)
+    service_cfg = resolve_section_font_config(
+        options.service_font_config, options.service_font_path, role="service"
+    )
+    title_cfg = resolve_section_font_config(
+        options.title_font_config, options.title_font_path, role="title"
+    )
+    speaker_cfg = resolve_section_font_config(
+        options.speaker_font_config, options.speaker_font_path, role="speaker"
+    )
     service_box, title_box, speaker_box = resolve_layout_boxes(options)
-    fill = options.text_color or TEXT_COLOR_WHITE
-    # Simplified app always renders white text with no shadow.
-    shadow_enabled = False
 
     if options.show_service_line:
         render_text_in_box(
             image,
             format_top_line(options),
-            service_font,
-            fill,
             service_box,
             mode="single",
-            shadow_enabled=shadow_enabled,
+            font_config=service_cfg,
         )
 
     render_text_in_box(
         image,
         format_title(options.sermon_title),
-        title_font,
-        fill,
         title_box,
         mode="title",
-        shadow_enabled=shadow_enabled,
+        font_config=title_cfg,
     )
 
     render_text_in_box(
         image,
         format_speaker(options.speaker_name),
-        speaker_font,
-        fill,
         speaker_box,
         mode="single",
-        shadow_enabled=shadow_enabled,
+        font_config=speaker_cfg,
     )
 
     # Guides only when explicitly requested — never because a text area is selected.
@@ -342,12 +385,13 @@ def save_title_image(options: TitleImageOptions) -> Path:
 def render_text_in_box(
     image: Image.Image,
     text: str,
-    font_path: Path | None,
-    fill: str,
     box: TextBox,
     *,
     mode: str,
-    shadow_enabled: bool = False,
+    font_config: FontConfig | None = None,
+    font_path: Path | None = None,
+    fill: str | None = None,
+    shadow_enabled: bool | None = None,
 ) -> Image.Image:
     """Draw text centered in ``box``, clipped so ink cannot escape the rectangle."""
     if not text:
@@ -355,9 +399,36 @@ def render_text_in_box(
     if image.mode != "RGBA":
         image = image.convert("RGBA")
 
-    # Small inset keeps italic edges from looking clipped by the guide.
-    fit_width = max(1, box.width - 4)
-    fit_height = max(1, box.height - 4)
+    if font_config is None:
+        role = "title" if mode == "title" else "service"
+        base = (
+            default_title_font_config()
+            if role == "title"
+            else default_service_font_config()
+        )
+        if font_path is not None:
+            try:
+                base.font_path = str(
+                    Path(font_path).resolve().relative_to(PROJECT_ROOT)
+                ).replace("\\", "/")
+            except Exception:
+                base.font_path = str(font_path)
+        if fill:
+            base.text_color = fill
+        if shadow_enabled:
+            base.use_font_file_default_style_only = False
+            base.shadow_enabled = True
+        font_config = base
+
+    cfg = font_config.effective()
+    resolved_font = cfg.resolved_font_path()
+    if not resolved_font.exists():
+        resolved_font = resolve_title_font_path() if mode == "title" else resolve_service_font_path()
+
+    # Inset + effect padding so stroke/skew/spacing stay inside the box.
+    pad_x, pad_y = _effect_fit_padding(cfg)
+    fit_width = max(1, box.width - 4 - pad_x)
+    fit_height = max(1, box.height - 4 - pad_y)
     if mode == "title":
         ceiling = (
             max(box.font_size, 40)
@@ -368,9 +439,14 @@ def render_text_in_box(
             text,
             max_width=fit_width,
             max_height=fit_height,
-            font_path=font_path,
+            font_path=resolved_font,
             max_font_size=ceiling,
             line_spacing=box.line_spacing,
+            letter_spacing=cfg.letter_spacing,
+            skew_angle=cfg.skew_angle,
+            outline_width=cfg.outline_width if cfg.outline_enabled else 0,
+            artificial_bold=cfg.artificial_bold,
+            underline=cfg.underline,
         )
     else:
         ceiling = (
@@ -382,28 +458,240 @@ def render_text_in_box(
             text,
             max_width=fit_width,
             max_height=fit_height,
-            font_path=font_path,
+            font_path=resolved_font,
             max_font_size=ceiling,
+            letter_spacing=cfg.letter_spacing,
+            skew_angle=cfg.skew_angle,
+            outline_width=cfg.outline_width if cfg.outline_enabled else 0,
+            artificial_bold=cfg.artificial_bold,
+            underline=cfg.underline,
         )
 
+    content = _render_text_layer(
+        lines,
+        font,
+        line_height,
+        block_height,
+        cfg,
+    )
+    # Clip content into the box tile (text stays inside; shadow may be clipped).
     tile = Image.new("RGBA", (max(1, box.width), max(1, box.height)), (0, 0, 0, 0))
-    tile_draw = ImageDraw.Draw(tile)
-    local_box = TextBox(0, 0, box.width, box.height)
-    origin_x, origin_y = center_text_block_in_box(local_box, block_height)
-    y = origin_y
-    rgba = _fill_to_rgba(fill)
-    for line in lines:
-        line_width = _text_width(tile_draw, line, font)
-        x = origin_x + max(0, (box.width - line_width) // 2)
-        # Top-left anchor matches measure_text_block / textbbox(..., anchor="lt").
-        if shadow_enabled:
-            _draw_text_shadow(tile_draw, (x, y), line, font, anchor="lt")
-        tile_draw.text((x, y), line, font=font, fill=rgba, anchor="lt")
-        y += line_height
+    if content.width > 0 and content.height > 0:
+        paste_x = max(0, (box.width - content.width) // 2)
+        paste_y = max(0, (box.height - content.height) // 2)
+        tile.alpha_composite(content, dest=(paste_x, paste_y))
 
-    # Paste only the box tile — anything outside the box is impossible.
     image.alpha_composite(tile, dest=(max(0, box.x), max(0, box.y)))
     return image
+
+
+def _effect_fit_padding(cfg: FontConfig) -> tuple[int, int]:
+    pad_x = 0
+    pad_y = 0
+    if cfg.outline_enabled and cfg.outline_width > 0:
+        pad_x += 2 * int(cfg.outline_width)
+        pad_y += 2 * int(cfg.outline_width)
+    if cfg.artificial_bold:
+        pad_x += 4
+        pad_y += 4
+    if cfg.underline:
+        pad_y += 8
+    # Shadow does not shrink the text fit box (text stays in box; shadow may clip).
+    return pad_x, pad_y
+
+
+def _skew_extra_width(height: int, angle: float) -> int:
+    if abs(angle) < 0.01:
+        return 0
+    return int(abs(math.tan(math.radians(angle))) * max(1, height)) + 2
+
+
+def _letter_spacing_extra(text: str, letter_spacing: float) -> float:
+    if abs(letter_spacing) < 0.01 or len(text) < 2:
+        return 0.0
+    return float(letter_spacing) * (len(text) - 1)
+
+
+def _render_text_layer(
+    lines: list[str],
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    line_height: int,
+    block_height: int,
+    cfg: FontConfig,
+) -> Image.Image:
+    """Rasterize styled text; may be larger than the final box before clipping."""
+    if not lines:
+        return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+
+    probe = ImageDraw.Draw(Image.new("RGBA", (10, 10), (0, 0, 0, 0)))
+    widths = [
+        _styled_text_width(probe, line, font, cfg.letter_spacing, cfg.artificial_bold)
+        for line in lines
+    ]
+    max_width = max(widths) if widths else 1
+    underline_extra = 10 if cfg.underline else 0
+    outline = int(cfg.outline_width) if cfg.outline_enabled else 0
+    pad = outline + (2 if cfg.artificial_bold else 0) + 4
+    shadow_pad_x = abs(int(cfg.shadow_offset_x)) if cfg.shadow_enabled else 0
+    shadow_pad_y = abs(int(cfg.shadow_offset_y)) if cfg.shadow_enabled else 0
+    canvas_w = max_width + 2 * pad + 2 * shadow_pad_x + _skew_extra_width(
+        block_height + underline_extra, cfg.skew_angle
+    )
+    canvas_h = block_height + underline_extra + 2 * pad + 2 * shadow_pad_y
+    layer = Image.new("RGBA", (max(1, canvas_w), max(1, canvas_h)), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+
+    origin_x = pad + shadow_pad_x
+    origin_y = pad + shadow_pad_y
+    y = origin_y
+    fill = _fill_to_rgba(cfg.text_color)
+    for line, line_width in zip(lines, widths):
+        x = origin_x + max(0, (max_width - line_width) // 2)
+        _draw_styled_line(draw, (x, y), line, font, fill, cfg)
+        y += line_height
+
+    if abs(cfg.skew_angle) > 0.01:
+        layer = _apply_skew(layer, cfg.skew_angle)
+
+    return _trim_alpha(layer)
+
+
+def _draw_styled_line(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    fill: tuple[int, int, int, int],
+    cfg: FontConfig,
+) -> None:
+    x, y = xy
+    stroke_width = int(cfg.outline_width) if cfg.outline_enabled else 0
+    stroke_fill = _fill_to_rgba(cfg.outline_color) if stroke_width else None
+    offsets = [(0, 0)]
+    if cfg.artificial_bold:
+        offsets = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0), (-1, -1), (1, 1)]
+
+    if cfg.shadow_enabled:
+        shadow = _fill_to_rgba(cfg.shadow_color)
+        sx = x + int(cfg.shadow_offset_x)
+        sy = y + int(cfg.shadow_offset_y)
+        for dx, dy in offsets:
+            _draw_text_with_spacing(
+                draw,
+                (sx + dx, sy + dy),
+                text,
+                font,
+                shadow,
+                cfg.letter_spacing,
+                stroke_width=0,
+                stroke_fill=None,
+            )
+
+    for dx, dy in offsets:
+        _draw_text_with_spacing(
+            draw,
+            (x + dx, y + dy),
+            text,
+            font,
+            fill,
+            cfg.letter_spacing,
+            stroke_width=stroke_width,
+            stroke_fill=stroke_fill,
+        )
+
+    if cfg.underline:
+        bbox = _styled_text_bbox(draw, text, font, cfg.letter_spacing, cfg.artificial_bold)
+        underline_y = y + max(bbox[3] - bbox[1] + 2, int(getattr(font, "size", 20) * 0.12))
+        draw.line(
+            (x + bbox[0], underline_y, x + bbox[2], underline_y),
+            fill=fill,
+            width=max(2, int(getattr(font, "size", 20) * 0.04)),
+        )
+
+
+def _draw_text_with_spacing(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    fill: tuple[int, int, int, int],
+    letter_spacing: float,
+    *,
+    stroke_width: int = 0,
+    stroke_fill: tuple[int, int, int, int] | None = None,
+) -> None:
+    x, y = xy
+    if abs(letter_spacing) < 0.01:
+        kwargs: dict[str, Any] = {"font": font, "fill": fill, "anchor": "lt"}
+        if stroke_width > 0 and stroke_fill is not None:
+            kwargs["stroke_width"] = stroke_width
+            kwargs["stroke_fill"] = stroke_fill
+        draw.text((x, y), text, **kwargs)
+        return
+    cursor = float(x)
+    for index, char in enumerate(text):
+        kwargs = {"font": font, "fill": fill, "anchor": "lt"}
+        if stroke_width > 0 and stroke_fill is not None:
+            kwargs["stroke_width"] = stroke_width
+            kwargs["stroke_fill"] = stroke_fill
+        draw.text((int(round(cursor)), y), char, **kwargs)
+        cursor += _text_width(draw, char, font)
+        if index < len(text) - 1:
+            cursor += letter_spacing
+
+
+def _styled_text_width(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    letter_spacing: float,
+    artificial_bold: bool,
+) -> int:
+    width = _text_width(draw, text, font) + int(_letter_spacing_extra(text, letter_spacing))
+    if artificial_bold:
+        width += 2
+    return max(1, width)
+
+
+def _styled_text_bbox(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    letter_spacing: float,
+    artificial_bold: bool,
+) -> tuple[int, int, int, int]:
+    width = _styled_text_width(draw, text, font, letter_spacing, artificial_bold)
+    height = _text_height(draw, text, font)
+    return 0, 0, width, height
+
+
+def _apply_skew(image: Image.Image, angle: float) -> Image.Image:
+    """Shear horizontally; positive angle slants right."""
+    if abs(angle) < 0.01:
+        return image
+    shear = math.tan(math.radians(angle))
+    extra = int(abs(shear) * image.height) + 2
+    wide = Image.new("RGBA", (image.width + extra, image.height), (0, 0, 0, 0))
+    # Shift so negative shear stays on canvas.
+    offset = extra if shear < 0 else 0
+    wide.paste(image, (offset, 0))
+    # AFFINE: x' = x + shear*y
+    return wide.transform(
+        wide.size,
+        Image.Transform.AFFINE,
+        (1, shear, -offset * (1 if shear >= 0 else 0), 0, 1, 0),
+        resample=Image.Resampling.BICUBIC,
+    )
+
+
+def _trim_alpha(image: Image.Image) -> Image.Image:
+    if image.mode != "RGBA":
+        return image
+    alpha = image.split()[-1]
+    bbox = alpha.getbbox()
+    if not bbox:
+        return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+    return image.crop(bbox)
 
 
 def center_text_block_in_box(box: TextBox, block_height: int) -> tuple[int, int]:
@@ -426,6 +714,11 @@ def measure_text_block(
     *,
     line_spacing: float = TITLE_LINE_SPACING,
     draw: ImageDraw.ImageDraw | None = None,
+    letter_spacing: float = 0.0,
+    artificial_bold: bool = False,
+    underline: bool = False,
+    skew_angle: float = 0.0,
+    outline_width: int = 0,
 ) -> tuple[int, int, int]:
     """Return (block_width, line_stride, block_height) for a line layout."""
     probe = draw or ImageDraw.Draw(Image.new("RGB", (10, 10)))
@@ -434,9 +727,17 @@ def measure_text_block(
         return 0, size, 0
 
     size = int(getattr(font, "size", 1) or 1)
-    widths = [_text_width(probe, line, font) for line in lines]
+    widths = [
+        _styled_text_width(probe, line, font, letter_spacing, artificial_bold)
+        for line in lines
+    ]
     glyph_heights = [_text_height(probe, line, font) for line in lines]
     max_glyph = max(glyph_heights)
+    if artificial_bold:
+        max_glyph += 2
+    if outline_width > 0:
+        max_glyph += 2 * int(outline_width)
+        widths = [w + 2 * int(outline_width) for w in widths]
     # Stride uses the larger of spacing-based size and real glyph height so short
     # titles can grow until they nearly fill the box height.
     line_stride = max(1, max_glyph, round(size * line_spacing))
@@ -444,7 +745,11 @@ def measure_text_block(
         block_height = max_glyph
     else:
         block_height = line_stride * (len(lines) - 1) + max_glyph
-    return max(widths), line_stride, block_height
+    if underline:
+        block_height += max(4, int(size * 0.08))
+    block_width = max(widths)
+    block_width += _skew_extra_width(block_height, skew_angle)
+    return block_width, line_stride, block_height
 
 
 def find_largest_fitting_font_size(
@@ -455,6 +760,11 @@ def find_largest_fitting_font_size(
     max_font_size: int = MAX_TITLE_FONT_SIZE,
     min_font_size: int = MIN_TITLE_FONT_SIZE,
     line_spacing: float = TITLE_LINE_SPACING,
+    letter_spacing: float = 0.0,
+    skew_angle: float = 0.0,
+    outline_width: int = 0,
+    artificial_bold: bool = False,
+    underline: bool = False,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, int, int, int, int]:
     """Binary-search the largest font size where the fixed line layout fits."""
     probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
@@ -475,7 +785,15 @@ def find_largest_fitting_font_size(
         mid = (lo + hi) // 2
         font = _load_font(mid, font_path)
         block_width, stride, block_height = measure_text_block(
-            lines, font, line_spacing=line_spacing, draw=probe
+            lines,
+            font,
+            line_spacing=line_spacing,
+            draw=probe,
+            letter_spacing=letter_spacing,
+            artificial_bold=artificial_bold,
+            underline=underline,
+            skew_angle=skew_angle,
+            outline_width=outline_width,
         )
         if block_width <= max_width and block_height <= max_height:
             best_font = font
@@ -497,6 +815,11 @@ def fit_single_line_text(
     font_path: Path | None = None,
     max_font_size: int = 120,
     min_font_size: int = MIN_SINGLE_LINE_FONT_SIZE,
+    letter_spacing: float = 0.0,
+    skew_angle: float = 0.0,
+    outline_width: int = 0,
+    artificial_bold: bool = False,
+    underline: bool = False,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
     return fit_service_text_one_line(
         text,
@@ -505,6 +828,11 @@ def fit_single_line_text(
         font_path=font_path,
         max_font_size=max_font_size,
         min_font_size=min_font_size,
+        letter_spacing=letter_spacing,
+        skew_angle=skew_angle,
+        outline_width=outline_width,
+        artificial_bold=artificial_bold,
+        underline=underline,
     )
 
 
@@ -515,6 +843,11 @@ def fit_service_text_one_line(
     font_path: Path | None = None,
     max_font_size: int = 120,
     min_font_size: int = MIN_SINGLE_LINE_FONT_SIZE,
+    letter_spacing: float = 0.0,
+    skew_angle: float = 0.0,
+    outline_width: int = 0,
+    artificial_bold: bool = False,
+    underline: bool = False,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
     cleaned = " ".join(text.strip().upper().split())
     if not cleaned:
@@ -528,6 +861,11 @@ def fit_service_text_one_line(
         max_font_size=min(max_font_size, max(1, max_height)),
         min_font_size=min_font_size,
         line_spacing=1.0,
+        letter_spacing=letter_spacing,
+        skew_angle=skew_angle,
+        outline_width=outline_width,
+        artificial_bold=artificial_bold,
+        underline=underline,
     )
     return font, [cleaned], stride, width, height
 
@@ -539,6 +877,11 @@ def fit_speaker_text_one_line(
     font_path: Path | None = None,
     max_font_size: int = 120,
     min_font_size: int = MIN_SINGLE_LINE_FONT_SIZE,
+    letter_spacing: float = 0.0,
+    skew_angle: float = 0.0,
+    outline_width: int = 0,
+    artificial_bold: bool = False,
+    underline: bool = False,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
     return fit_service_text_one_line(
         text,
@@ -547,6 +890,11 @@ def fit_speaker_text_one_line(
         font_path=font_path,
         max_font_size=max_font_size,
         min_font_size=min_font_size,
+        letter_spacing=letter_spacing,
+        skew_angle=skew_angle,
+        outline_width=outline_width,
+        artificial_bold=artificial_bold,
+        underline=underline,
     )
 
 
@@ -558,6 +906,11 @@ def fit_title_max_2_lines(
     max_font_size: int = MAX_TITLE_FONT_SIZE,
     min_font_size: int = MIN_TITLE_FONT_SIZE,
     line_spacing: float = TITLE_LINE_SPACING,
+    letter_spacing: float = 0.0,
+    skew_angle: float = 0.0,
+    outline_width: int = 0,
+    artificial_bold: bool = False,
+    underline: bool = False,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
     """Maximize font size for a 1- or 2-line title that fits the title box."""
     cleaned = format_title(title)
@@ -586,6 +939,11 @@ def fit_title_max_2_lines(
             max_font_size=ceiling,
             min_font_size=min_font_size,
             line_spacing=line_spacing,
+            letter_spacing=letter_spacing,
+            skew_angle=skew_angle,
+            outline_width=outline_width,
+            artificial_bold=artificial_bold,
+            underline=underline,
         )
         if size < min_font_size or width > max_width or height > max_height:
             # find_largest always returns something; reject if it still overflows.
@@ -594,7 +952,8 @@ def fit_title_max_2_lines(
         balance = 0
         if len(lines) == 2:
             balance = abs(
-                _text_width(probe, lines[0], font) - _text_width(probe, lines[1], font)
+                _styled_text_width(probe, lines[0], font, letter_spacing, artificial_bold)
+                - _styled_text_width(probe, lines[1], font, letter_spacing, artificial_bold)
             )
         # Prefer larger fonts; near ties prefer one line, then balanced wraps.
         score = (size, -len(lines), -balance)
@@ -606,7 +965,14 @@ def fit_title_max_2_lines(
         font = _load_font(min_font_size, font_path)
         lines = candidates[0][:2]
         width, stride, height = measure_text_block(
-            lines, font, line_spacing=line_spacing
+            lines,
+            font,
+            line_spacing=line_spacing,
+            letter_spacing=letter_spacing,
+            artificial_bold=artificial_bold,
+            underline=underline,
+            skew_angle=skew_angle,
+            outline_width=outline_width,
         )
         return font, lines, stride, width, height
 

@@ -22,33 +22,37 @@ streamlit run app.py
 
 ## Text and layout
 
-### Font Choices
+### Font Settings
 
-Open the **Font Choices** expander to pick a font for each text section:
+Open the **Font Settings** expander. Each text section has its own configuration:
 
-- Service line font
-- Sermon title font
-- Speaker / Minister font
+- Service line
+- Sermon title
+- Minister / Speaker
 
-Fonts are discovered from:
+Click **Configure** beside a section to open a font dialog:
 
-- the project `fonts/` folder (`.ttf` / `.otf`)
-- installed system font folders (macOS / Windows / Linux)
+- Choose a font from the project `fonts/` folder or installed system fonts
+- Set text color (white by default)
+- Optionally enable fancy effects: artificial bold, italic/skew, underline, shadow, outline, letter spacing
 
 Defaults:
 
-- Service / speaker → `BarlowCondensed-Bold.ttf`
-- Title → `BarlowCondensed-BoldItalic.ttf`
+- Service / speaker → `BarlowCondensed-Bold.ttf` (non-italic font file)
+- Title → `BarlowCondensed-BoldItalic.ttf` (italic comes from the font file itself)
+- **Use font file default style only** is on — no artificial bold, skew, underline, shadow, outline, or letter spacing unless you turn them on
 
 If a saved font is missing, the app falls back safely and keeps rendering.
 
-All text is **white** with **no shadow**.
+Preset buttons save and restore each section’s full font config (font file + effects), not just the path.
+
 - Service line and speaker stay on **one line** and auto-shrink to fit their boxes
 - Sermon title auto-fits inside the **title box**:
   - Short titles grow aggressively to fill the title area height
   - 1 line if it fits at a large size
   - otherwise wrap to **2 lines max**, then maximize font size for that wrap
 - Manual line breaks in the title are kept when they are 2 lines or fewer
+- Fitting accounts for enabled effects (outline, skew, spacing, etc.) so text stays inside its box
 
 ## Default bounding boxes (1920×1080)
 
@@ -68,7 +72,7 @@ Around the preview:
 - **Up / Down** move the selected box (kept centered horizontally)
 - **+ / −** scale the selected text font (box height adjusts to fit)
 - **4 preset buttons** on the left load saved layouts
-- **Save as Preset** stores the current boxes/fonts into a chosen slot (1–4)
+- **Save as Preset** stores the current boxes, font configs (including effects), and related layout into a chosen slot (1–4)
 
 Selected text is highlighted in the preview guides. Export stays clean (no guides).
 
