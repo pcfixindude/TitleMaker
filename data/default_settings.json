@@ -1,4 +1,29 @@
 {
+  "name": "Startup Default",
+  "service": {
+    "x": 280,
+    "y": 65,
+    "width": 1360,
+    "height": 90,
+    "font_size": 86,
+    "auto_size": true
+  },
+  "title": {
+    "x": 50,
+    "y": 175,
+    "width": 1820,
+    "height": 460,
+    "font_size": 520,
+    "auto_size": true
+  },
+  "speaker": {
+    "x": 280,
+    "y": 665,
+    "width": 1360,
+    "height": 90,
+    "font_size": 80,
+    "auto_size": true
+  },
   "service_font_config": {
     "font_path": "fonts/BarlowCondensed-Medium.ttf",
     "text_color": "#FFFFFF",
@@ -53,5 +78,7 @@
   "service_font_path": "fonts/BarlowCondensed-Medium.ttf",
   "title_font_path": "fonts/BarlowCondensed-BoldItalic.ttf",
   "speaker_font_path": "fonts/BarlowCondensed-Medium.ttf",
-  "title_line_spacing": -55
+  "background_label": "2026.jpeg",
+  "title_line_spacing": -55,
+  "show_bounding_boxes": false
 }
