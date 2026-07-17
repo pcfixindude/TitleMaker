@@ -53,5 +53,5 @@
   "service_font_path": "fonts/BarlowCondensed-Medium.ttf",
   "title_font_path": "fonts/BarlowCondensed-BoldItalic.ttf",
   "speaker_font_path": "fonts/BarlowCondensed-Medium.ttf",
-  "title_line_spacing": -55
+  "title_line_spacing": -34
 }

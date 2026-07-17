@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -21,7 +21,25 @@ from font_discovery import (
     get_font_display_name,
 )
 from font_preview import safely_render_font_sample, sample_text_for_role
-from monark_schedule import find_current_service_entry, get_monark_service_entries
+from monark_schedule import (
+    adjacent_entry,
+    entry_key,
+    find_current_service_entry,
+    find_entry_by_row_id,
+    mark_entry_exported,
+    service_option_label,
+    update_entry_text,
+)
+from service_log import (
+    apply_display_edits,
+    archive_service_log,
+    entries_to_display_rows,
+    export_service_log_csv,
+    generate_service_log,
+    import_service_log_csv,
+    load_service_log,
+    save_service_log,
+)
 from simple_presets import (
     PRESET_SLOTS,
     delete_default_settings,
@@ -108,6 +126,7 @@ def main() -> None:
     st.caption("Simple Monark Springs livestream title maker")
 
     _ensure_simple_defaults()
+    _apply_pending_service_log_input_sync()
 
     templates = list_template_backgrounds()
     background_labels = [GENERATED_BACKGROUND] + [path.name for path in templates]
@@ -122,11 +141,22 @@ def main() -> None:
     warning = st.session_state.pop("simple_settings_warning", "")
     if warning:
         st.warning(warning)
+    log_warning = st.session_state.pop("service_log_warning", "")
+    if log_warning:
+        st.warning(log_warning)
 
     left, right = st.columns([0.95, 1.25], gap="large")
 
     with left:
         st.subheader("Service")
+        entries = list(st.session_state.get("service_log_entries") or [])
+        has_log = bool(entries)
+
+        if has_log:
+            _render_current_service_controls(entries)
+        else:
+            st.info("Generate a Monark Service Log to track all services.")
+
         simple_date = st.date_input("Date", key="simple_date_input")
         service_date = simple_date if isinstance(simple_date, date) else date.today()
         day = service_date.strftime("%A")
@@ -138,26 +168,6 @@ def main() -> None:
             format_func=lambda name: f"{SERVICE_LABELS[name]} ({name})",
             key="simple_service_select",
         )
-
-        with st.expander("Optional Monark schedule helpers", expanded=False):
-            year = st.number_input(
-                "Schedule year",
-                min_value=1900,
-                max_value=2100,
-                value=date.today().year,
-                step=1,
-                key="simple_schedule_year",
-            )
-            if st.button("Jump to current Monark service", width="stretch"):
-                entries = get_monark_service_entries(int(year))
-                current = find_current_service_entry(entries)
-                if current:
-                    st.session_state.simple_date_input = current["date"]
-                    st.session_state.simple_service_select = current["service"]
-                    st.success(f"Selected {current['service_line']}")
-                    st.rerun()
-                else:
-                    st.info("Today is not in the generated Monark schedule.")
 
         st.subheader("Title")
         sermon_title = st.text_area(
@@ -183,6 +193,9 @@ def main() -> None:
             key="simple_speaker_input",
             placeholder="Type speaker here...",
         )
+
+        # Keep the selected service-log row in sync with live title inputs.
+        _sync_selected_service_from_inputs(sermon_title, speaker)
 
         st.subheader("Background")
         background_label = st.selectbox(
@@ -241,6 +254,7 @@ def main() -> None:
             output_path = EXPORTS_DIR / export_filename(export_options)
             render_title_image(export_options).save(output_path, "PNG")
             st.session_state.simple_last_export = str(output_path)
+            _mark_selected_service_exported(output_path)
             st.success(f"Saved to {output_path}")
 
         if st.session_state.get("simple_last_export"):
@@ -256,7 +270,377 @@ def main() -> None:
         message = st.session_state.pop("simple_preset_message", "")
         if message:
             st.info(message)
+        log_message = st.session_state.pop("service_log_message", "")
+        if log_message:
+            st.info(log_message)
         _render_preview_workspace(export_options)
+
+    _render_service_log_section()
+
+
+def _render_current_service_controls(entries: list) -> None:
+    row_ids = [entry_key(entry) for entry in entries]
+    labels = {entry_key(entry): service_option_label(entry) for entry in entries}
+    selected = st.session_state.get("service_log_selected_row_id")
+    if selected not in row_ids and row_ids:
+        st.session_state.service_log_selected_row_id = row_ids[0]
+        selected = row_ids[0]
+        _load_service_row_into_inputs(selected)
+    if st.session_state.get("service_log_current_select") not in row_ids:
+        st.session_state.service_log_current_select = selected
+
+    st.selectbox(
+        "Current Service",
+        options=row_ids,
+        format_func=lambda rid, mapping=labels: mapping.get(rid, rid),
+        key="service_log_current_select",
+        on_change=_on_current_service_changed,
+    )
+    # Keep selected id aligned with the selectbox.
+    st.session_state.service_log_selected_row_id = st.session_state.get(
+        "service_log_current_select"
+    )
+
+    nav = st.columns(3)
+    nav[0].button(
+        "Previous Service",
+        key="service_log_prev",
+        width="stretch",
+        on_click=_move_service,
+        args=(-1,),
+    )
+    nav[1].button(
+        "Next Service",
+        key="service_log_next",
+        width="stretch",
+        on_click=_move_service,
+        args=(1,),
+    )
+    nav[2].button(
+        "Jump to Current Service",
+        key="service_log_jump",
+        width="stretch",
+        on_click=_jump_to_current_service,
+    )
+
+
+def _on_current_service_changed() -> None:
+    previous = st.session_state.get("service_log_selected_row_id")
+    new_id = st.session_state.get("service_log_current_select")
+    if previous and previous != new_id:
+        _commit_inputs_to_row(previous)
+    st.session_state.service_log_selected_row_id = new_id
+    _load_service_row_into_inputs(new_id)
+
+
+def _move_service(step: int) -> None:
+    entries = list(st.session_state.get("service_log_entries") or [])
+    current = st.session_state.get("service_log_selected_row_id")
+    _commit_inputs_to_row(current)
+    nxt = adjacent_entry(entries, current, step=step)
+    if not nxt:
+        st.session_state.service_log_message = (
+            "Already at the first service." if step < 0 else "Already at the last service."
+        )
+        return
+    new_id = entry_key(nxt)
+    st.session_state.service_log_selected_row_id = new_id
+    st.session_state.service_log_current_select = new_id
+    _load_service_row_into_inputs(new_id)
+
+
+def _jump_to_current_service() -> None:
+    entries = list(st.session_state.get("service_log_entries") or [])
+    _commit_inputs_to_row(st.session_state.get("service_log_selected_row_id"))
+    current = find_current_service_entry(entries)
+    if not current:
+        st.session_state.service_log_message = (
+            "Today is not in the current service log."
+        )
+        return
+    new_id = entry_key(current)
+    st.session_state.service_log_selected_row_id = new_id
+    st.session_state.service_log_current_select = new_id
+    _load_service_row_into_inputs(new_id)
+    st.session_state.service_log_message = f"Jumped to {current['service_line']}."
+
+
+def _commit_inputs_to_row(row_id_value: str | None) -> None:
+    if not row_id_value:
+        return
+    entries = list(st.session_state.get("service_log_entries") or [])
+    if not entries:
+        return
+    update_entry_text(
+        entries,
+        row_id_value,
+        str(st.session_state.get("simple_title_input") or ""),
+        str(st.session_state.get("simple_speaker_input") or ""),
+    )
+    st.session_state.service_log_entries = entries
+    save_service_log(
+        entries, year=int(st.session_state.get("service_log_year") or date.today().year)
+    )
+
+
+def _load_service_row_into_inputs(row_id_value: str | None) -> None:
+    entries = list(st.session_state.get("service_log_entries") or [])
+    entry = find_entry_by_row_id(entries, row_id_value)
+    if not entry:
+        return
+    st.session_state.simple_title_input = str(entry.get("title") or "")
+    st.session_state.simple_speaker_input = str(entry.get("speaker") or "")
+    st.session_state.simple_date_input = entry["date"]
+    st.session_state.simple_service_select = entry["service"]
+
+
+def _sync_selected_service_from_inputs(title: str, speaker: str) -> None:
+    row_id_value = st.session_state.get("service_log_selected_row_id")
+    entries = list(st.session_state.get("service_log_entries") or [])
+    if not row_id_value or not entries:
+        return
+    entry = find_entry_by_row_id(entries, row_id_value)
+    if not entry:
+        return
+    if entry.get("title") == title and entry.get("speaker") == speaker:
+        return
+    update_entry_text(entries, row_id_value, title, speaker)
+    st.session_state.service_log_entries = entries
+    save_service_log(
+        entries, year=int(st.session_state.get("service_log_year") or date.today().year)
+    )
+
+
+def _mark_selected_service_exported(output_path: Path) -> None:
+    row_id_value = st.session_state.get("service_log_selected_row_id")
+    entries = list(st.session_state.get("service_log_entries") or [])
+    if not row_id_value or not entries:
+        return
+    mark_entry_exported(
+        entries,
+        row_id_value,
+        exported_at=datetime.now(),
+        exported_file=str(output_path),
+    )
+    st.session_state.service_log_entries = entries
+    save_service_log(
+        entries, year=int(st.session_state.get("service_log_year") or date.today().year)
+    )
+
+
+def _render_service_log_section() -> None:
+    st.divider()
+    with st.expander("Service Log", expanded=True):
+        year = st.number_input(
+            "Service log year",
+            min_value=1900,
+            max_value=2100,
+            step=1,
+            key="service_log_year",
+        )
+        existing = list(st.session_state.get("service_log_entries") or [])
+        gen_cols = st.columns([1.4, 1])
+        with gen_cols[0]:
+            if existing:
+                st.checkbox(
+                    "Replace existing service log when generating",
+                    key="service_log_confirm_replace",
+                    help="Required before regenerating. Existing log is archived first.",
+                )
+            if st.button("Generate Monark Service Log", width="stretch"):
+                _generate_service_log(int(year))
+        with gen_cols[1]:
+            st.caption(f"{len(existing)} service rows loaded")
+
+        entries = list(st.session_state.get("service_log_entries") or [])
+        if not entries:
+            st.info("Generate a Monark Service Log to track all services.")
+            _render_service_log_csv_controls([])
+            return
+
+        display_rows = entries_to_display_rows(entries)
+        try:
+            import pandas as pd
+
+            frame = pd.DataFrame(display_rows)
+            column_config = {
+                "Date": st.column_config.TextColumn("Date", disabled=True),
+                "Weekday": st.column_config.TextColumn("Weekday", disabled=True),
+                "Service": st.column_config.TextColumn("Service", disabled=True),
+                "Service Line": st.column_config.TextColumn(
+                    "Service Line", disabled=True
+                ),
+                "Sermon Title": st.column_config.TextColumn("Sermon Title"),
+                "Minister / Speaker": st.column_config.TextColumn(
+                    "Minister / Speaker"
+                ),
+                "Notes": st.column_config.TextColumn("Notes"),
+                "Exported": st.column_config.CheckboxColumn("Exported", disabled=True),
+                "Exported At": st.column_config.TextColumn(
+                    "Exported At", disabled=True
+                ),
+                "Exported File": st.column_config.TextColumn(
+                    "Exported File", disabled=True
+                ),
+                "Include": st.column_config.CheckboxColumn("Include"),
+                "_row_id": None,
+            }
+            edited = st.data_editor(
+                frame,
+                hide_index=True,
+                width="stretch",
+                num_rows="fixed",
+                column_config=column_config,
+                column_order=[
+                    "Date",
+                    "Weekday",
+                    "Service",
+                    "Service Line",
+                    "Sermon Title",
+                    "Minister / Speaker",
+                    "Notes",
+                    "Exported",
+                    "Exported At",
+                    "Exported File",
+                    "Include",
+                ],
+                key="service_log_data_editor",
+            )
+            edited_rows = edited.to_dict(orient="records")
+        except Exception:
+            # Fallback without pandas-specific config.
+            edited_rows = st.data_editor(
+                display_rows,
+                hide_index=True,
+                width="stretch",
+                num_rows="fixed",
+                key="service_log_data_editor_fallback",
+            )
+
+        updated = apply_display_edits(entries, edited_rows)
+        before = [
+            (
+                entry_key(entry),
+                entry.get("title"),
+                entry.get("speaker"),
+                entry.get("notes"),
+                bool(entry.get("include")),
+            )
+            for entry in entries
+        ]
+        after = [
+            (
+                entry_key(entry),
+                entry.get("title"),
+                entry.get("speaker"),
+                entry.get("notes"),
+                bool(entry.get("include")),
+            )
+            for entry in updated
+        ]
+        if after != before:
+            st.session_state.service_log_entries = updated
+            save_service_log(updated, year=int(year))
+            selected = st.session_state.get("service_log_selected_row_id")
+            selected_entry = find_entry_by_row_id(updated, selected)
+            if selected_entry is not None:
+                # Stage input updates for the next run to avoid widget key conflicts.
+                st.session_state._service_log_pending_input_sync = {
+                    "title": selected_entry.get("title") or "",
+                    "speaker": selected_entry.get("speaker") or "",
+                    "date": selected_entry["date"],
+                    "service": selected_entry["service"],
+                }
+
+        _render_service_log_csv_controls(updated)
+
+
+def _render_service_log_csv_controls(entries: list) -> None:
+    c1, c2 = st.columns(2)
+    csv_text = export_service_log_csv(entries) if entries else ""
+    c1.download_button(
+        "Export Service Log CSV",
+        data=csv_text or "row_id\n",
+        file_name="service_log.csv",
+        mime="text/csv",
+        width="stretch",
+        disabled=not bool(entries),
+    )
+    uploaded = c2.file_uploader(
+        "Import Service Log CSV",
+        type=["csv"],
+        key="service_log_csv_upload",
+    )
+    if uploaded is not None:
+        try:
+            text = uploaded.getvalue().decode("utf-8-sig")
+            imported = import_service_log_csv(text)
+            st.session_state.service_log_entries = imported
+            save_service_log(
+                imported,
+                year=int(st.session_state.get("service_log_year") or date.today().year),
+            )
+            if imported:
+                st.session_state.service_log_selected_row_id = entry_key(imported[0])
+                st.session_state.service_log_current_select = entry_key(imported[0])
+                st.session_state._service_log_pending_input_sync = {
+                    "title": imported[0].get("title") or "",
+                    "speaker": imported[0].get("speaker") or "",
+                    "date": imported[0]["date"],
+                    "service": imported[0]["service"],
+                }
+            st.session_state.service_log_message = (
+                f"Imported {len(imported)} service log rows."
+            )
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Could not import CSV: {exc}")
+
+
+def _generate_service_log(year: int) -> None:
+    existing = list(st.session_state.get("service_log_entries") or [])
+    if existing and not st.session_state.get("service_log_confirm_replace"):
+        st.session_state.service_log_message = (
+            "Check “Replace existing service log when generating” before replacing."
+        )
+        return
+    if existing:
+        archive_path = archive_service_log(existing, year=year)
+        if archive_path:
+            st.session_state.service_log_message = (
+                f"Previous log archived to {archive_path.name}. "
+                f"Generated Monark service log for {year}."
+            )
+        else:
+            st.session_state.service_log_message = (
+                f"Generated Monark service log for {year}."
+            )
+    else:
+        st.session_state.service_log_message = (
+            f"Generated Monark service log for {year}."
+        )
+    generated = generate_service_log(year)
+    st.session_state.service_log_entries = generated
+    save_service_log(generated, year=year)
+    if generated:
+        first_id = entry_key(generated[0])
+        st.session_state.service_log_selected_row_id = first_id
+        st.session_state.service_log_current_select = first_id
+        _load_service_row_into_inputs(first_id)
+    st.session_state.service_log_confirm_replace = False
+    st.rerun()
+
+
+def _apply_pending_service_log_input_sync() -> None:
+    pending = st.session_state.pop("_service_log_pending_input_sync", None)
+    if not pending:
+        return
+    st.session_state.simple_title_input = pending.get("title") or ""
+    st.session_state.simple_speaker_input = pending.get("speaker") or ""
+    if pending.get("date") is not None:
+        st.session_state.simple_date_input = pending["date"]
+    if pending.get("service"):
+        st.session_state.simple_service_select = pending["service"]
 
 
 def _render_preview_workspace(export_options: TitleImageOptions) -> None:
@@ -428,6 +812,24 @@ def _ensure_simple_defaults() -> None:
     st.session_state.setdefault("simple_preset_save_slot", 1)
     st.session_state.setdefault("simple_preset_name", "")
     st.session_state.setdefault("font_editor_selected_section", "title")
+    st.session_state.setdefault("service_log_year", date.today().year)
+    st.session_state.setdefault("service_log_selected_row_id", None)
+    st.session_state.setdefault("service_log_confirm_replace", False)
+
+    if "service_log_entries" not in st.session_state:
+        loaded_log, log_warning = load_service_log()
+        st.session_state.service_log_entries = loaded_log
+        if log_warning:
+            st.session_state.service_log_warning = log_warning
+        if loaded_log:
+            selected = st.session_state.get("service_log_selected_row_id") or entry_key(
+                loaded_log[0]
+            )
+            st.session_state.service_log_selected_row_id = selected
+            st.session_state.service_log_current_select = selected
+            if not st.session_state.get("service_log_inputs_seeded"):
+                _load_service_row_into_inputs(selected)
+                st.session_state.service_log_inputs_seeded = True
 
     if not st.session_state.get("simple_startup_settings_applied"):
         saved_defaults, warning = load_default_settings()

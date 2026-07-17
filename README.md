@@ -96,6 +96,21 @@ Selected text is highlighted in the preview guides. Export stays clean (no guide
 - Presets and defaults save boxes, fonts and font options, background, title line spacing, bounding-box visibility, and text effects
 - JSON files are written atomically (temp file, then replace) to avoid corruption
 
+## Service Log Spreadsheet
+
+Track every Monark service in an editable spreadsheet:
+
+1. Open **Service Log** and choose a year.
+2. Click **Generate Monark Service Log** (30 rows: 10 days × AM/AFT/PM).
+3. Choose **Current Service**, then type the sermon title and minister/speaker.
+4. Use **Previous Service** / **Next Service** to move through every row (including blanks).
+5. **Jump to Current Service** selects today’s AM/AFT/PM row when the date is in the meeting.
+6. **Export PNG** marks the selected row as exported and stores the file path/time.
+7. Edit or correct rows in the Service Log table.
+8. **Export Service Log CSV** / **Import Service Log CSV** for backups or external edits.
+
+The service log is saved separately from style presets in `data/service_log.json`.
+
 ## Export
 
 - Size: 1920×1080 PNG
