@@ -93,6 +93,43 @@ def default_font_id_for_role(role: str) -> str:
     return name
 
 
+def get_font_display_name(font: FontChoice | Path | str) -> str:
+    """Human-readable label for a font choice or path."""
+    if isinstance(font, FontChoice):
+        return font.label
+    path = Path(str(font))
+    return path.name or str(font)
+
+
+def filter_fonts(
+    fonts: list[FontChoice],
+    query: str | None = None,
+    *,
+    limit: int = 25,
+) -> list[FontChoice]:
+    """
+    Filter fonts by name/id, keeping project fonts first.
+
+    ``discover_fonts`` already returns project fonts before system fonts;
+    this helper preserves that order while applying search + limit.
+    """
+    needle = (query or "").strip().lower()
+    project = [choice for choice in fonts if choice.source == "project"]
+    system = [choice for choice in fonts if choice.source != "project"]
+    ordered = project + system
+    if needle:
+        ordered = [
+            choice
+            for choice in ordered
+            if needle in choice.label.lower()
+            or needle in choice.font_id.lower()
+            or needle in choice.path.name.lower()
+        ]
+    if limit is not None and limit > 0:
+        return ordered[:limit]
+    return ordered
+
+
 def resolve_selected_font(
     font_id: str | None,
     *,

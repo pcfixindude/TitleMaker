@@ -46,6 +46,10 @@ TITLE_FONT_SEARCH_SCALE = 2.2
 MIN_TITLE_FONT_SIZE = 28
 MIN_SINGLE_LINE_FONT_SIZE = 28
 TITLE_LINE_SPACING = 0.95
+DEFAULT_TITLE_LINE_SPACING_PX = 0
+MIN_TITLE_LINE_GAP_RATIO = 0.4
+TITLE_LINE_SPACING_PX_MIN = -80
+TITLE_LINE_SPACING_PX_MAX = 120
 TEXT_COLOR_WHITE = "#FFFFFF"
 LAYOUT_DEFAULTS_VERSION = 6
 
@@ -76,6 +80,7 @@ class TextBox:
     font_size: int = 86
     max_font_size: int = MAX_TITLE_FONT_SIZE
     line_spacing: float = TITLE_LINE_SPACING
+    line_gap_adjust: int = 0
     skew_angle: float = 0.0
 
 
@@ -101,6 +106,7 @@ class TitleImageOptions:
     speaker_font_config: FontConfig | None = None
     auto_size: bool = True
     title_font_size: int = MAX_TITLE_FONT_SIZE
+    title_line_spacing: int = DEFAULT_TITLE_LINE_SPACING_PX
     shadow_enabled: bool = False
     show_service_line: bool = True
     skew_enabled: bool = False
@@ -242,12 +248,21 @@ def box_dict(box: TextBox) -> dict[str, int]:
     return {"x": box.x, "y": box.y, "width": box.width, "height": box.height}
 
 
+def clamp_title_line_spacing(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = DEFAULT_TITLE_LINE_SPACING_PX
+    return max(TITLE_LINE_SPACING_PX_MIN, min(TITLE_LINE_SPACING_PX_MAX, parsed))
+
+
 def text_box_from_dict(
     values: dict[str, Any],
     *,
     max_font_size: int = MAX_TITLE_FONT_SIZE,
     font_size: int | None = None,
     auto_size: bool | None = None,
+    line_gap_adjust: int | None = None,
 ) -> TextBox:
     resolved_font = int(values["font_size"]) if values.get("font_size") is not None else font_size
     if resolved_font is None:
@@ -260,6 +275,15 @@ def text_box_from_dict(
     resolved_max = int(values.get("max_font_size") or max_font_size)
     if not resolved_auto:
         resolved_max = max(resolved_max, resolved_font)
+    if line_gap_adjust is None:
+        if values.get("line_gap_adjust") is not None:
+            gap = int(values["line_gap_adjust"])
+        elif values.get("title_line_spacing") is not None:
+            gap = clamp_title_line_spacing(values["title_line_spacing"])
+        else:
+            gap = DEFAULT_TITLE_LINE_SPACING_PX
+    else:
+        gap = clamp_title_line_spacing(line_gap_adjust)
     return TextBox(
         x=int(values["x"]),
         y=int(values["y"]),
@@ -269,13 +293,18 @@ def text_box_from_dict(
         max_font_size=resolved_max,
         auto_size=resolved_auto,
         line_spacing=TITLE_LINE_SPACING,
+        line_gap_adjust=gap,
     )
 
 
 def resolve_layout_boxes(options: TitleImageOptions) -> tuple[TextBox, TextBox, TextBox]:
+    from dataclasses import replace
+
     service_box = options.service_line_box or default_service_box()
     title_box = options.title_box or default_title_box()
     speaker_box = options.speaker_box or default_speaker_box()
+    spacing = clamp_title_line_spacing(options.title_line_spacing)
+    title_box = replace(title_box, line_gap_adjust=spacing)
     return service_box, title_box, speaker_box
 
 
@@ -442,6 +471,7 @@ def render_text_in_box(
             font_path=resolved_font,
             max_font_size=ceiling,
             line_spacing=box.line_spacing,
+            line_gap_adjust=box.line_gap_adjust,
             letter_spacing=cfg.letter_spacing,
             skew_angle=cfg.skew_angle,
             outline_width=cfg.outline_width if cfg.outline_enabled else 0,
@@ -708,11 +738,29 @@ def _fill_to_rgba(fill: str) -> tuple[int, int, int, int]:
     return 255, 255, 255, 255
 
 
+def effective_line_stride(
+    max_glyph: int,
+    font_size: int,
+    *,
+    line_spacing: float = TITLE_LINE_SPACING,
+    line_gap_adjust: int = 0,
+    line_count: int = 1,
+) -> int:
+    """Baseline stride used for fitting and drawing (must stay in sync)."""
+    base = max(1, max_glyph, round(int(font_size) * float(line_spacing)))
+    if line_count < 2:
+        return base
+    # Allow tightening, but keep a floor so lines rarely fully overlap.
+    min_stride = max(1, int(max_glyph * MIN_TITLE_LINE_GAP_RATIO))
+    return max(min_stride, base + int(line_gap_adjust))
+
+
 def measure_text_block(
     lines: list[str],
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     *,
     line_spacing: float = TITLE_LINE_SPACING,
+    line_gap_adjust: int = 0,
     draw: ImageDraw.ImageDraw | None = None,
     letter_spacing: float = 0.0,
     artificial_bold: bool = False,
@@ -738,9 +786,13 @@ def measure_text_block(
     if outline_width > 0:
         max_glyph += 2 * int(outline_width)
         widths = [w + 2 * int(outline_width) for w in widths]
-    # Stride uses the larger of spacing-based size and real glyph height so short
-    # titles can grow until they nearly fill the box height.
-    line_stride = max(1, max_glyph, round(size * line_spacing))
+    line_stride = effective_line_stride(
+        max_glyph,
+        size,
+        line_spacing=line_spacing,
+        line_gap_adjust=line_gap_adjust,
+        line_count=len(lines),
+    )
     if len(lines) == 1:
         block_height = max_glyph
     else:
@@ -760,6 +812,7 @@ def find_largest_fitting_font_size(
     max_font_size: int = MAX_TITLE_FONT_SIZE,
     min_font_size: int = MIN_TITLE_FONT_SIZE,
     line_spacing: float = TITLE_LINE_SPACING,
+    line_gap_adjust: int = 0,
     letter_spacing: float = 0.0,
     skew_angle: float = 0.0,
     outline_width: int = 0,
@@ -788,6 +841,7 @@ def find_largest_fitting_font_size(
             lines,
             font,
             line_spacing=line_spacing,
+            line_gap_adjust=line_gap_adjust,
             draw=probe,
             letter_spacing=letter_spacing,
             artificial_bold=artificial_bold,
@@ -906,6 +960,7 @@ def fit_title_max_2_lines(
     max_font_size: int = MAX_TITLE_FONT_SIZE,
     min_font_size: int = MIN_TITLE_FONT_SIZE,
     line_spacing: float = TITLE_LINE_SPACING,
+    line_gap_adjust: int = 0,
     letter_spacing: float = 0.0,
     skew_angle: float = 0.0,
     outline_width: int = 0,
@@ -929,6 +984,7 @@ def fit_title_max_2_lines(
         ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int
     ] | None = None
     best_score: tuple[int, int, int] | None = None
+    gap = clamp_title_line_spacing(line_gap_adjust)
 
     for lines in candidates:
         font, size, stride, width, height = find_largest_fitting_font_size(
@@ -939,6 +995,7 @@ def fit_title_max_2_lines(
             max_font_size=ceiling,
             min_font_size=min_font_size,
             line_spacing=line_spacing,
+            line_gap_adjust=gap,
             letter_spacing=letter_spacing,
             skew_angle=skew_angle,
             outline_width=outline_width,
@@ -968,6 +1025,7 @@ def fit_title_max_2_lines(
             lines,
             font,
             line_spacing=line_spacing,
+            line_gap_adjust=gap,
             letter_spacing=letter_spacing,
             artificial_bold=artificial_bold,
             underline=underline,

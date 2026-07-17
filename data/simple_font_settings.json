@@ -1,6 +1,6 @@
 {
   "service_font_config": {
-    "font_path": "fonts/BarlowCondensed-Bold.ttf",
+    "font_path": "fonts/BarlowCondensed-SemiBold.ttf",
     "text_color": "#FFFFFF",
     "use_font_file_default_style_only": true,
     "artificial_bold": false,
@@ -19,29 +19,29 @@
   "title_font_config": {
     "font_path": "fonts/BarlowCondensed-BoldItalic.ttf",
     "text_color": "#FFFFFF",
-    "use_font_file_default_style_only": true,
+    "use_font_file_default_style_only": false,
     "artificial_bold": false,
     "artificial_italic": false,
     "skew_angle": 0.0,
     "underline": false,
-    "shadow_enabled": false,
+    "shadow_enabled": true,
     "shadow_offset_x": 4,
     "shadow_offset_y": 4,
     "shadow_color": "#000000",
     "outline_enabled": false,
-    "outline_width": 0,
+    "outline_width": 3,
     "outline_color": "#000000",
     "letter_spacing": 0.0
   },
   "speaker_font_config": {
     "font_path": "fonts/BarlowCondensed-Bold.ttf",
-    "text_color": "#FFFFFF",
+    "text_color": "#ffffff",
     "use_font_file_default_style_only": true,
     "artificial_bold": false,
     "artificial_italic": false,
     "skew_angle": 0.0,
     "underline": false,
-    "shadow_enabled": false,
+    "shadow_enabled": true,
     "shadow_offset_x": 4,
     "shadow_offset_y": 4,
     "shadow_color": "#000000",
@@ -50,7 +50,8 @@
     "outline_color": "#000000",
     "letter_spacing": 0.0
   },
-  "service_font_path": "fonts/BarlowCondensed-Bold.ttf",
+  "service_font_path": "fonts/BarlowCondensed-SemiBold.ttf",
   "title_font_path": "fonts/BarlowCondensed-BoldItalic.ttf",
-  "speaker_font_path": "fonts/BarlowCondensed-Bold.ttf"
+  "speaker_font_path": "fonts/BarlowCondensed-Bold.ttf",
+  "title_line_spacing": -55
 }

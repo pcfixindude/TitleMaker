@@ -56,7 +56,10 @@ class DualFontResolveTest(unittest.TestCase):
         self.assertIn("simple_service_font_config", source)
         self.assertIn("simple_title_font_config", source)
         self.assertIn("simple_speaker_font_config", source)
-        self.assertIn("Configure Service Line Font", source)
+        self.assertIn("Advanced Text Styling", source)
+        self.assertNotIn("Fancy options", source)
+        self.assertIn("font_editor_selected_section", source)
+        self.assertNotIn("@st.dialog", source)
 
     def test_service_font_resolves_to_barlow_bold(self) -> None:
         if not BARLOW_BOLD.exists():
