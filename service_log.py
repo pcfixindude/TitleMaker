@@ -14,7 +14,7 @@ from monark_schedule import (
     sort_service_entries,
 )
 from simple_presets import DATA_DIR, atomic_write_json, ensure_data_dir
-from title_renderer import format_service_line, service_code
+from title_renderer import format_service_line, normalize_service_code, service_code
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -183,11 +183,13 @@ def apply_display_edits(
     for row in edited_rows:
         rid = str(row.get("_row_id") or "")
         if not rid or rid not in by_id:
-            # Fall back to date+service matching.
+            # Fall back only with an explicit Service value (never default to Morning).
             try:
+                service = row.get("Service")
+                if not service:
+                    continue
                 d = _as_date(row.get("Date"))
-                service = str(row.get("Service") or "Morning")
-                rid = f"{d.isoformat()}_{service_code(service)}"
+                rid = f"{d.isoformat()}_{normalize_service_code(str(service))}"
             except Exception:
                 continue
         if rid not in by_id:

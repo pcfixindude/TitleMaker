@@ -194,6 +194,47 @@ class ServiceLogUiCopyTest(unittest.TestCase):
         self.assertIn("Next Service", source)
         self.assertIn("Export Service Log CSV", source)
 
+    def test_only_apply_pending_helper_assigns_widget_title_keys(self) -> None:
+        source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("def _stage_service_row_reload", source)
+        self.assertIn("def _apply_pending_input_values_before_widgets", source)
+        self.assertNotIn("def _load_service_row_into_inputs", source)
+        self.assertIn("needs_input_reload", source)
+        self.assertIn("pending_title_input", source)
+
+        in_apply = False
+        for line in source.splitlines():
+            if line.startswith("def _apply_pending_input_values_before_widgets"):
+                in_apply = True
+                continue
+            if line.startswith("def ") and in_apply:
+                in_apply = False
+            if "setdefault" in line:
+                continue
+            if "simple_title_input =" in line or "simple_speaker_input =" in line:
+                self.assertTrue(
+                    in_apply,
+                    f"Widget key assignment outside apply helper: {line.strip()}",
+                )
+
+    def test_generate_and_navigation_stage_reload(self) -> None:
+        source = Path(__file__).resolve().parents[1].joinpath("app.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("_stage_service_row_reload(first_id)", source)
+        self.assertIn("on_click=_generate_service_log_clicked", source)
+        # Navigation/selection should stage, not assign widget keys directly.
+        for needle in (
+            "def _on_current_service_changed",
+            "def _move_service",
+            "def _jump_to_current_service",
+            "def _generate_service_log",
+        ):
+            self.assertIn(needle, source)
+        self.assertGreaterEqual(source.count("_stage_service_row_reload("), 5)
+
 
 if __name__ == "__main__":
     unittest.main()

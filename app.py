@@ -25,8 +25,8 @@ from monark_schedule import (
     adjacent_entry,
     entry_key,
     find_current_service_entry,
-    find_entry_by_row_id,
-    mark_entry_exported,
+    get_service_entry_by_row_id,
+    mark_service_exported,
     service_option_label,
     update_entry_text,
 )
@@ -70,6 +70,7 @@ from title_renderer import (
     export_filename,
     list_template_backgrounds,
     normalize_selected_area,
+    normalize_service_code,
     render_title_image,
     text_box_from_dict,
 )
@@ -126,7 +127,8 @@ def main() -> None:
     st.caption("Simple Monark Springs livestream title maker")
 
     _ensure_simple_defaults()
-    _apply_pending_service_log_input_sync()
+    # Only this helper may assign to widget-owned input keys (before widgets render).
+    _apply_pending_input_values_before_widgets()
 
     templates = list_template_backgrounds()
     background_labels = [GENERATED_BACKGROUND] + [path.name for path in templates]
@@ -158,16 +160,40 @@ def main() -> None:
             st.info("Generate a Monark Service Log to track all services.")
 
         simple_date = st.date_input("Date", key="simple_date_input")
-        service_date = simple_date if isinstance(simple_date, date) else date.today()
-        day = service_date.strftime("%A")
-        st.markdown(f"**Day:** {day}")
-        st.caption("Day is calculated from the selected date.")
-        service = st.selectbox(
+        widget_service_date = (
+            simple_date if isinstance(simple_date, date) else date.today()
+        )
+        widget_service = st.selectbox(
             "Service",
             SERVICES,
             format_func=lambda name: f"{SERVICE_LABELS[name]} ({name})",
             key="simple_service_select",
         )
+
+        # Selected log row_id is the only source of truth for date/service/line.
+        selected_entry = _active_service_log_entry(entries if has_log else [])
+        if selected_entry is not None:
+            service_date = selected_entry["date"]
+            if not isinstance(service_date, date):
+                service_date = date.fromisoformat(str(service_date))
+            day = str(selected_entry.get("weekday") or service_date.strftime("%A"))
+            service = str(selected_entry.get("service") or widget_service)
+            service_line = str(
+                selected_entry.get("service_line")
+                or f"{day.upper()} {normalize_service_code(service)} "
+                f"{service_date.month}-{service_date.day}-{service_date.strftime('%y')}"
+            )
+        else:
+            service_date = widget_service_date
+            day = service_date.strftime("%A")
+            service = widget_service
+            service_line = (
+                f"{day.upper()} {normalize_service_code(service)} "
+                f"{service_date.month}-{service_date.day}-{service_date.strftime('%y')}"
+            )
+
+        st.markdown(f"**Day:** {day}")
+        st.caption("Day is calculated from the selected service log row (or date).")
 
         st.subheader("Title")
         sermon_title = st.text_area(
@@ -250,6 +276,11 @@ def main() -> None:
         export_options = replace(
             export_options, show_bounding_boxes=False, selected_layout_area=None
         )
+
+        selected_id = _get_selected_service_row_id()
+        st.caption(f"Selected log row: {selected_id or '(none — manual mode)'}")
+        st.caption(f"Service line: {service_line}")
+
         if st.button("Export PNG", type="primary", width="stretch"):
             output_path = EXPORTS_DIR / export_filename(export_options)
             render_title_image(export_options).save(output_path, "PNG")
@@ -278,14 +309,49 @@ def main() -> None:
     _render_service_log_section()
 
 
+def _get_selected_service_row_id(*, prefer_widget: bool = True) -> str | None:
+    """Return the active service-log row_id (source of truth for log updates)."""
+    if prefer_widget:
+        current_select = st.session_state.get("service_log_current_select")
+        if current_select:
+            st.session_state.selected_service_row_id = current_select
+            # Keep legacy key in sync for older session state.
+            st.session_state.service_log_selected_row_id = current_select
+            return str(current_select)
+    selected = st.session_state.get("selected_service_row_id") or st.session_state.get(
+        "service_log_selected_row_id"
+    )
+    return str(selected) if selected else None
+
+
+def _set_selected_service_row_id(
+    row_id_value: str | None, *, sync_widget: bool = True
+) -> None:
+    st.session_state.selected_service_row_id = row_id_value
+    st.session_state.service_log_selected_row_id = row_id_value
+    # Only assign the selectbox key before that widget is created on this run.
+    if sync_widget and row_id_value:
+        st.session_state.service_log_current_select = row_id_value
+
+
+def _active_service_log_entry(entries: list) -> dict | None:
+    selected_id = _get_selected_service_row_id()
+    return get_service_entry_by_row_id(entries, selected_id)
+
+
 def _render_current_service_controls(entries: list) -> None:
     row_ids = [entry_key(entry) for entry in entries]
+    label_to_row_id = {
+        service_option_label(entry): entry_key(entry) for entry in entries
+    }
     labels = {entry_key(entry): service_option_label(entry) for entry in entries}
-    selected = st.session_state.get("service_log_selected_row_id")
+    selected = _get_selected_service_row_id()
     if selected not in row_ids and row_ids:
-        st.session_state.service_log_selected_row_id = row_ids[0]
         selected = row_ids[0]
-        _load_service_row_into_inputs(selected)
+        _set_selected_service_row_id(selected)
+        _stage_service_row_reload(selected)
+        st.rerun()
+    # Align selectbox source-of-truth before the widget is created.
     if st.session_state.get("service_log_current_select") not in row_ids:
         st.session_state.service_log_current_select = selected
 
@@ -296,10 +362,12 @@ def _render_current_service_controls(entries: list) -> None:
         key="service_log_current_select",
         on_change=_on_current_service_changed,
     )
-    # Keep selected id aligned with the selectbox.
-    st.session_state.service_log_selected_row_id = st.session_state.get(
-        "service_log_current_select"
-    )
+    # Internal value is row_id; map from label dict only if needed (never partial match).
+    chosen = st.session_state.get("service_log_current_select")
+    if chosen not in row_ids and chosen in label_to_row_id:
+        chosen = label_to_row_id[chosen]
+    # Widget already owns service_log_current_select — sync row_id keys only.
+    _set_selected_service_row_id(chosen, sync_widget=False)
 
     nav = st.columns(3)
     nav[0].button(
@@ -325,17 +393,18 @@ def _render_current_service_controls(entries: list) -> None:
 
 
 def _on_current_service_changed() -> None:
-    previous = st.session_state.get("service_log_selected_row_id")
+    # Do not prefer the widget here — it already holds the new value.
+    previous = _get_selected_service_row_id(prefer_widget=False)
     new_id = st.session_state.get("service_log_current_select")
-    if previous and previous != new_id:
+    if previous and new_id and previous != new_id:
         _commit_inputs_to_row(previous)
-    st.session_state.service_log_selected_row_id = new_id
-    _load_service_row_into_inputs(new_id)
+    _set_selected_service_row_id(new_id)
+    _stage_service_row_reload(new_id)
 
 
 def _move_service(step: int) -> None:
     entries = list(st.session_state.get("service_log_entries") or [])
-    current = st.session_state.get("service_log_selected_row_id")
+    current = _get_selected_service_row_id()
     _commit_inputs_to_row(current)
     nxt = adjacent_entry(entries, current, step=step)
     if not nxt:
@@ -344,14 +413,13 @@ def _move_service(step: int) -> None:
         )
         return
     new_id = entry_key(nxt)
-    st.session_state.service_log_selected_row_id = new_id
-    st.session_state.service_log_current_select = new_id
-    _load_service_row_into_inputs(new_id)
+    _set_selected_service_row_id(new_id)
+    _stage_service_row_reload(new_id)
 
 
 def _jump_to_current_service() -> None:
     entries = list(st.session_state.get("service_log_entries") or [])
-    _commit_inputs_to_row(st.session_state.get("service_log_selected_row_id"))
+    _commit_inputs_to_row(_get_selected_service_row_id())
     current = find_current_service_entry(entries)
     if not current:
         st.session_state.service_log_message = (
@@ -359,9 +427,8 @@ def _jump_to_current_service() -> None:
         )
         return
     new_id = entry_key(current)
-    st.session_state.service_log_selected_row_id = new_id
-    st.session_state.service_log_current_select = new_id
-    _load_service_row_into_inputs(new_id)
+    _set_selected_service_row_id(new_id)
+    _stage_service_row_reload(new_id)
     st.session_state.service_log_message = f"Jumped to {current['service_line']}."
 
 
@@ -370,6 +437,8 @@ def _commit_inputs_to_row(row_id_value: str | None) -> None:
         return
     entries = list(st.session_state.get("service_log_entries") or [])
     if not entries:
+        return
+    if get_service_entry_by_row_id(entries, row_id_value) is None:
         return
     update_entry_text(
         entries,
@@ -383,23 +452,80 @@ def _commit_inputs_to_row(row_id_value: str | None) -> None:
     )
 
 
-def _load_service_row_into_inputs(row_id_value: str | None) -> None:
+def _stage_service_row_reload(row_id_value: str | None) -> None:
+    """
+    Stage selected-row values for the next pre-widget apply step.
+
+    Do not assign to widget-owned keys here (simple_title_input, etc.).
+    """
     entries = list(st.session_state.get("service_log_entries") or [])
-    entry = find_entry_by_row_id(entries, row_id_value)
+    entry = get_service_entry_by_row_id(entries, row_id_value)
     if not entry:
         return
-    st.session_state.simple_title_input = str(entry.get("title") or "")
-    st.session_state.simple_speaker_input = str(entry.get("speaker") or "")
-    st.session_state.simple_date_input = entry["date"]
-    st.session_state.simple_service_select = entry["service"]
+    st.session_state.pending_service_row_id = row_id_value
+    st.session_state.pending_title_input = str(entry.get("title") or "")
+    st.session_state.pending_speaker_input = str(entry.get("speaker") or "")
+    st.session_state.pending_notes_input = str(entry.get("notes") or "")
+    st.session_state.pending_date_input = entry["date"]
+    st.session_state.pending_service_input = entry["service"]
+    st.session_state.pending_current_service_select = row_id_value
+    st.session_state.needs_input_reload = True
+
+
+def _apply_pending_input_values_before_widgets() -> None:
+    """
+    Apply staged service-row values to widget keys.
+
+    This is the ONLY helper that may assign to widget-owned keys such as
+    simple_title_input / simple_speaker_input / simple_date_input /
+    simple_service_select / service_log_current_select.
+    """
+    # Support legacy pending dict used by spreadsheet/CSV paths.
+    legacy = st.session_state.pop("_service_log_pending_input_sync", None)
+    if isinstance(legacy, dict):
+        st.session_state.pending_title_input = legacy.get("title") or ""
+        st.session_state.pending_speaker_input = legacy.get("speaker") or ""
+        st.session_state.pending_notes_input = legacy.get("notes") or ""
+        if legacy.get("date") is not None:
+            st.session_state.pending_date_input = legacy["date"]
+        if legacy.get("service"):
+            st.session_state.pending_service_input = legacy["service"]
+        st.session_state.needs_input_reload = True
+
+    if not st.session_state.pop("needs_input_reload", False):
+        return
+
+    if "pending_title_input" in st.session_state:
+        st.session_state.simple_title_input = st.session_state.pop("pending_title_input")
+    if "pending_speaker_input" in st.session_state:
+        st.session_state.simple_speaker_input = st.session_state.pop(
+            "pending_speaker_input"
+        )
+    if "pending_notes_input" in st.session_state:
+        # Notes live on the spreadsheet; keep pending for future widget if added.
+        st.session_state.pop("pending_notes_input", None)
+    if "pending_date_input" in st.session_state:
+        st.session_state.simple_date_input = st.session_state.pop("pending_date_input")
+    if "pending_service_input" in st.session_state:
+        st.session_state.simple_service_select = st.session_state.pop(
+            "pending_service_input"
+        )
+    if "pending_current_service_select" in st.session_state:
+        st.session_state.service_log_current_select = st.session_state.pop(
+            "pending_current_service_select"
+        )
+    if "pending_service_row_id" in st.session_state:
+        pending_id = st.session_state.pop("pending_service_row_id")
+        st.session_state.selected_service_row_id = pending_id
+        st.session_state.service_log_selected_row_id = pending_id
 
 
 def _sync_selected_service_from_inputs(title: str, speaker: str) -> None:
-    row_id_value = st.session_state.get("service_log_selected_row_id")
+    row_id_value = _get_selected_service_row_id()
     entries = list(st.session_state.get("service_log_entries") or [])
     if not row_id_value or not entries:
         return
-    entry = find_entry_by_row_id(entries, row_id_value)
+    entry = get_service_entry_by_row_id(entries, row_id_value)
     if not entry:
         return
     if entry.get("title") == title and entry.get("speaker") == speaker:
@@ -412,16 +538,32 @@ def _sync_selected_service_from_inputs(title: str, speaker: str) -> None:
 
 
 def _mark_selected_service_exported(output_path: Path) -> None:
-    row_id_value = st.session_state.get("service_log_selected_row_id")
+    row_id_value = _get_selected_service_row_id()
     entries = list(st.session_state.get("service_log_entries") or [])
     if not row_id_value or not entries:
+        st.info(
+            "No service log row selected; exported image but did not update service log."
+        )
         return
-    mark_entry_exported(
+    selected_entry = get_service_entry_by_row_id(entries, row_id_value)
+    if selected_entry is None:
+        st.warning(
+            f"No service log row matches `{row_id_value}`; "
+            "exported image but did not update service log."
+        )
+        return
+    updated = mark_service_exported(
         entries,
         row_id_value,
-        exported_at=datetime.now(),
         exported_file=str(output_path),
+        exported_at=datetime.now(),
     )
+    if not updated:
+        st.warning(
+            f"Could not mark `{row_id_value}` exported; "
+            "no fallback row was updated."
+        )
+        return
     st.session_state.service_log_entries = entries
     save_service_log(
         entries, year=int(st.session_state.get("service_log_year") or date.today().year)
@@ -447,8 +589,11 @@ def _render_service_log_section() -> None:
                     key="service_log_confirm_replace",
                     help="Required before regenerating. Existing log is archived first.",
                 )
-            if st.button("Generate Monark Service Log", width="stretch"):
-                _generate_service_log(int(year))
+            st.button(
+                "Generate Monark Service Log",
+                width="stretch",
+                on_click=_generate_service_log_clicked,
+            )
         with gen_cols[1]:
             st.caption(f"{len(existing)} service rows loaded")
 
@@ -541,16 +686,11 @@ def _render_service_log_section() -> None:
         if after != before:
             st.session_state.service_log_entries = updated
             save_service_log(updated, year=int(year))
-            selected = st.session_state.get("service_log_selected_row_id")
-            selected_entry = find_entry_by_row_id(updated, selected)
+            selected = _get_selected_service_row_id()
+            selected_entry = get_service_entry_by_row_id(updated, selected)
             if selected_entry is not None:
-                # Stage input updates for the next run to avoid widget key conflicts.
-                st.session_state._service_log_pending_input_sync = {
-                    "title": selected_entry.get("title") or "",
-                    "speaker": selected_entry.get("speaker") or "",
-                    "date": selected_entry["date"],
-                    "service": selected_entry["service"],
-                }
+                _stage_service_row_reload(selected)
+                st.rerun()
 
         _render_service_log_csv_controls(updated)
 
@@ -581,20 +721,20 @@ def _render_service_log_csv_controls(entries: list) -> None:
                 year=int(st.session_state.get("service_log_year") or date.today().year),
             )
             if imported:
-                st.session_state.service_log_selected_row_id = entry_key(imported[0])
-                st.session_state.service_log_current_select = entry_key(imported[0])
-                st.session_state._service_log_pending_input_sync = {
-                    "title": imported[0].get("title") or "",
-                    "speaker": imported[0].get("speaker") or "",
-                    "date": imported[0]["date"],
-                    "service": imported[0]["service"],
-                }
+                first_id = entry_key(imported[0])
+                _set_selected_service_row_id(first_id)
+                _stage_service_row_reload(first_id)
             st.session_state.service_log_message = (
                 f"Imported {len(imported)} service log rows."
             )
             st.rerun()
         except Exception as exc:
             st.error(f"Could not import CSV: {exc}")
+
+
+def _generate_service_log_clicked() -> None:
+    year = int(st.session_state.get("service_log_year") or date.today().year)
+    _generate_service_log(year)
 
 
 def _generate_service_log(year: int) -> None:
@@ -624,23 +764,15 @@ def _generate_service_log(year: int) -> None:
     save_service_log(generated, year=year)
     if generated:
         first_id = entry_key(generated[0])
-        st.session_state.service_log_selected_row_id = first_id
-        st.session_state.service_log_current_select = first_id
-        _load_service_row_into_inputs(first_id)
+        _set_selected_service_row_id(first_id)
+        # Stage only — applied next run by _apply_pending_input_values_before_widgets.
+        _stage_service_row_reload(first_id)
     st.session_state.service_log_confirm_replace = False
-    st.rerun()
 
 
 def _apply_pending_service_log_input_sync() -> None:
-    pending = st.session_state.pop("_service_log_pending_input_sync", None)
-    if not pending:
-        return
-    st.session_state.simple_title_input = pending.get("title") or ""
-    st.session_state.simple_speaker_input = pending.get("speaker") or ""
-    if pending.get("date") is not None:
-        st.session_state.simple_date_input = pending["date"]
-    if pending.get("service"):
-        st.session_state.simple_service_select = pending["service"]
+    """Backward-compatible alias. """
+    _apply_pending_input_values_before_widgets()
 
 
 def _render_preview_workspace(export_options: TitleImageOptions) -> None:
@@ -813,8 +945,17 @@ def _ensure_simple_defaults() -> None:
     st.session_state.setdefault("simple_preset_name", "")
     st.session_state.setdefault("font_editor_selected_section", "title")
     st.session_state.setdefault("service_log_year", date.today().year)
+    st.session_state.setdefault("selected_service_row_id", None)
     st.session_state.setdefault("service_log_selected_row_id", None)
     st.session_state.setdefault("service_log_confirm_replace", False)
+    # Migrate legacy session key once.
+    if (
+        st.session_state.get("selected_service_row_id") is None
+        and st.session_state.get("service_log_selected_row_id")
+    ):
+        st.session_state.selected_service_row_id = (
+            st.session_state.service_log_selected_row_id
+        )
 
     if "service_log_entries" not in st.session_state:
         loaded_log, log_warning = load_service_log()
@@ -822,14 +963,15 @@ def _ensure_simple_defaults() -> None:
         if log_warning:
             st.session_state.service_log_warning = log_warning
         if loaded_log:
-            selected = st.session_state.get("service_log_selected_row_id") or entry_key(
+            selected = _get_selected_service_row_id(prefer_widget=False) or entry_key(
                 loaded_log[0]
             )
-            st.session_state.service_log_selected_row_id = selected
-            st.session_state.service_log_current_select = selected
+            _set_selected_service_row_id(selected)
             if not st.session_state.get("service_log_inputs_seeded"):
-                _load_service_row_into_inputs(selected)
+                _stage_service_row_reload(selected)
                 st.session_state.service_log_inputs_seeded = True
+                # Pending values are applied immediately below via
+                # _apply_pending_input_values_before_widgets() in main().
 
     if not st.session_state.get("simple_startup_settings_applied"):
         saved_defaults, warning = load_default_settings()

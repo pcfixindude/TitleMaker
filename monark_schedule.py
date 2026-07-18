@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta
 from io import StringIO
 from typing import Any
 
-from title_renderer import format_service_line, service_code
+from title_renderer import format_service_line, normalize_service_code, service_code
 
 
 SERVICES = ["Morning", "Afternoon", "Evening"]
@@ -85,14 +85,37 @@ def mark_entry_exported(
     exported_at: datetime | None = None,
     exported_file: str = "",
 ) -> list[dict[str, Any]]:
+    mark_service_exported(
+        entries,
+        selected_key,
+        exported_file=exported_file,
+        exported_at=exported_at,
+    )
+    return entries
+
+
+def mark_service_exported(
+    entries: list[dict[str, Any]],
+    selected_row_id: str | None,
+    exported_file: str = "",
+    exported_at: datetime | None = None,
+) -> bool:
+    """
+    Mark exactly one service-log row exported by exact row_id match.
+
+    Returns True if a matching row was updated. Never falls back to another
+    row for the same date/weekday.
+    """
+    if not selected_row_id:
+        return False
     timestamp = (exported_at or datetime.now()).isoformat(timespec="seconds")
     for entry in entries:
-        if entry_key(entry) == selected_key:
+        if entry_key(entry) == selected_row_id:
             entry["exported"] = True
             entry["exported_at"] = timestamp
             entry["exported_file"] = exported_file
-            break
-    return entries
+            return True
+    return False
 
 
 def find_entry_by_row_id(
@@ -104,6 +127,13 @@ def find_entry_by_row_id(
         if entry_key(entry) == row_id_value:
             return entry
     return None
+
+
+def get_service_entry_by_row_id(
+    entries: list[dict[str, Any]], row_id_value: str | None
+) -> dict[str, Any] | None:
+    """Alias for find_entry_by_row_id — row_id is the only lookup key."""
+    return find_entry_by_row_id(entries, row_id_value)
 
 
 def find_entry_index(
@@ -151,10 +181,13 @@ def find_current_service_entry(
 ) -> dict[str, Any] | None:
     current = now or datetime.now()
     service = service_for_time(current.time())
-    code = service_code(service)
+    code = normalize_service_code(service)
 
     for entry in entries:
-        if _coerce_date(entry["date"]) == current.date() and entry["service_code"] == code:
+        entry_code = normalize_service_code(
+            str(entry.get("service_code") or entry.get("service") or "")
+        )
+        if _coerce_date(entry["date"]) == current.date() and entry_code == code:
             return entry
     return None
 

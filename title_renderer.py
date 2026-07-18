@@ -138,8 +138,9 @@ def format_top_line(options: TitleImageOptions) -> str:
     return format_service_line(options.day, options.service, options.service_date)
 
 
-def service_code(service: str) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", "", service.lower())
+def normalize_service_code(value: str) -> str:
+    """Map Morning/AM, Afternoon/AFT, Evening/PM to AM/AFT/PM."""
+    normalized = re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
     service_codes = {
         "morning": "AM",
         "am": "AM",
@@ -148,7 +149,12 @@ def service_code(service: str) -> str:
         "evening": "PM",
         "pm": "PM",
     }
-    return service_codes.get(normalized, service.upper())
+    return service_codes.get(normalized, str(value or "").upper())
+
+
+def service_code(service: str) -> str:
+    """Alias for normalize_service_code (kept for existing call sites)."""
+    return normalize_service_code(service)
 
 
 def format_title(value: str) -> str:
