@@ -32,11 +32,11 @@ class MonarkScheduleTest(unittest.TestCase):
         self.assertEqual(first_day.weekday(), 4)
         self.assertEqual(first_day.month, 7)
 
-    def test_schedule_ends_on_second_sunday_after_start(self) -> None:
+    def test_schedule_ends_on_sunday_after_ten_days(self) -> None:
         dates = get_monark_schedule_dates(2026)
 
         self.assertEqual(dates[-1], dates[0] + timedelta(days=9))
-        self.assertEqual(dates[-1].weekday(), 6)
+        self.assertEqual(dates[-1].weekday(), 6)  # Sunday night of day 10
 
     def test_schedule_generates_ten_days(self) -> None:
         self.assertEqual(len(get_monark_schedule_dates(2026)), 10)

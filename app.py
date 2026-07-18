@@ -4,7 +4,7 @@ import json
 import platform
 import subprocess
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -28,7 +28,9 @@ from monark_schedule import (
     entry_key,
     find_current_service_entry,
     get_service_entry_by_row_id,
+    get_third_friday_of_july,
     mark_service_exported,
+    service_log_schedule_warning,
     service_option_label,
     update_entry_text,
 )
@@ -66,8 +68,6 @@ from title_renderer import (
     TITLE_LINE_SPACING_PX_MAX,
     TITLE_LINE_SPACING_PX_MIN,
     TitleImageOptions,
-    WHATSAPP_WEB_URL,
-    YOUTUBE_PLAYLIST_URL,
     clamp_title_line_spacing,
     ensure_project_dirs,
     export_filename,
@@ -80,6 +80,7 @@ from title_renderer import (
     resolve_export_dir,
     text_box_from_dict,
 )
+from workflow_links import WHATSAPP_WEB_URL, YOUTUBE_PLAYLIST_URL
 
 EXPORT_LOCATION_OPTIONS = ("Downloads folder", "App exports folder")
 
@@ -649,6 +650,10 @@ def _mark_selected_service_exported(output_path: Path) -> None:
 def _render_service_log_section() -> None:
     st.divider()
     with st.expander("Service Log", expanded=True):
+        st.caption(
+            "Monark meeting starts on the third Friday of July and runs "
+            "10 days through Sunday night (30 services: AM / AFT / PM each day)."
+        )
         year = st.number_input(
             "Service log year",
             min_value=1900,
@@ -656,26 +661,55 @@ def _render_service_log_section() -> None:
             step=1,
             key="service_log_year",
         )
+        expected_start = get_third_friday_of_july(int(year))
+        expected_end = expected_start + timedelta(days=9)
+        st.caption(
+            f"{int(year)} meeting: {expected_start.strftime('%A %m-%d-%y')} → "
+            f"{expected_end.strftime('%A %m-%d-%y')} "
+            f"({expected_start.isoformat()} … {expected_end.isoformat()})"
+        )
         existing = list(st.session_state.get("service_log_entries") or [])
+        schedule_warning = service_log_schedule_warning(existing, year=int(year))
+        if schedule_warning:
+            st.warning(schedule_warning)
+
         gen_cols = st.columns([1.4, 1])
         with gen_cols[0]:
             if existing:
                 st.checkbox(
                     "Replace existing service log when generating",
                     key="service_log_confirm_replace",
-                    help="Required before regenerating. Existing log is archived first.",
+                    help=(
+                        "Required before regenerating. The current log is archived "
+                        "first, then replaced with the third-Friday 10-day schedule."
+                    ),
                 )
             st.button(
                 "Generate Monark Service Log",
                 width="stretch",
                 on_click=_generate_service_log_clicked,
+                key="service_log_generate",
             )
+            if existing:
+                st.button(
+                    "Regenerate Monark Service Log",
+                    width="stretch",
+                    on_click=_generate_service_log_clicked,
+                    key="service_log_regenerate",
+                    help=(
+                        "Archives the current log (after confirm checkbox) and "
+                        "rebuilds dates from the third Friday of July."
+                    ),
+                )
         with gen_cols[1]:
             st.caption(f"{len(existing)} service rows loaded")
 
         entries = list(st.session_state.get("service_log_entries") or [])
         if not entries:
-            st.info("Generate a Monark Service Log to track all services.")
+            st.info(
+                "Generate a Monark Service Log to track all services "
+                "(third Friday of July, 10 days, 30 rows)."
+            )
             _render_service_log_csv_controls([])
             return
 
@@ -817,24 +851,27 @@ def _generate_service_log(year: int) -> None:
     existing = list(st.session_state.get("service_log_entries") or [])
     if existing and not st.session_state.get("service_log_confirm_replace"):
         st.session_state.service_log_message = (
-            "Check “Replace existing service log when generating” before replacing."
+            "Check “Replace existing service log when generating” before replacing. "
+            "This archives the old log, then builds the third-Friday 10-day schedule."
         )
         return
+    start = get_third_friday_of_july(year)
+    end = start + timedelta(days=9)
+    summary = (
+        f"Generated Monark service log for {year}: "
+        f"{start.isoformat()} (Friday) through {end.isoformat()} (Sunday), "
+        "10 days / 30 services."
+    )
     if existing:
         archive_path = archive_service_log(existing, year=year)
         if archive_path:
             st.session_state.service_log_message = (
-                f"Previous log archived to {archive_path.name}. "
-                f"Generated Monark service log for {year}."
+                f"Previous log archived to {archive_path.name}. {summary}"
             )
         else:
-            st.session_state.service_log_message = (
-                f"Generated Monark service log for {year}."
-            )
+            st.session_state.service_log_message = summary
     else:
-        st.session_state.service_log_message = (
-            f"Generated Monark service log for {year}."
-        )
+        st.session_state.service_log_message = summary
     generated = generate_service_log(year)
     st.session_state.service_log_entries = generated
     save_service_log(generated, year=year)

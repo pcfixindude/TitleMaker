@@ -17,11 +17,16 @@ SERVICE_START_PM = time(19, 30)
 
 
 def get_third_friday_of_july(year: int) -> date:
-    """Return the third Friday of July for the given year."""
-    current = date(year, 7, 1)
-    while current.weekday() != 4:  # Friday
-        current += timedelta(days=1)
-    return current + timedelta(days=14)
+    """
+    Return the third Friday of July for the given year.
+
+    July 1 → first Friday on or after that day → add 14 days.
+    """
+    july_first = date(year, 7, 1)
+    # Monday=0 … Friday=4
+    days_until_friday = (4 - july_first.weekday()) % 7
+    first_friday = july_first + timedelta(days=days_until_friday)
+    return first_friday + timedelta(days=14)
 
 
 def get_monark_start_date(year: int) -> date:
@@ -30,15 +35,22 @@ def get_monark_start_date(year: int) -> date:
 
 
 def get_monark_schedule_dates(year: int) -> list[date]:
-    start_date = get_monark_start_date(year)
-    return [start_date + timedelta(days=offset) for offset in range(10)]
+    """
+    Return the 10 Monark meeting dates for a year.
+
+    Day 1 = third Friday of July; day 10 = Sunday nine days later.
+    Do not compute “second Sunday” separately — range(10) from Friday is enough.
+    """
+    start = get_third_friday_of_july(year)
+    return [start + timedelta(days=i) for i in range(10)]
 
 
 def get_monark_service_entries(year: int) -> list[dict]:
+    """Build 30 service rows: 10 days × AM / AFT / PM."""
     entries: list[dict] = []
     for service_date in get_monark_schedule_dates(year):
         weekday = service_date.strftime("%A")
-        for service in SERVICES:
+        for service in SERVICES:  # Morning, Afternoon, Evening → AM, AFT, PM
             code = service_code(service)
             entries.append(
                 {
@@ -60,6 +72,33 @@ def get_monark_service_entries(year: int) -> list[dict]:
                 }
             )
     return entries
+
+
+def service_log_schedule_warning(
+    entries: list[dict[str, Any]],
+    year: int | None = None,
+) -> str | None:
+    """
+    Warn when a saved log does not start on the third Friday for its year.
+
+    Old logs (e.g. last-Friday-of-July) must be regenerated deliberately.
+    """
+    if not entries:
+        return None
+    first = entries[0]
+    first_date = _coerce_date(first.get("date"))
+    check_year = int(year or first_date.year)
+    expected_start = get_third_friday_of_july(check_year)
+    if first_date == expected_start and len(entries) == 30:
+        return None
+    expected_end = expected_start + timedelta(days=9)
+    return (
+        f"This service log does not match the Monark schedule for {check_year}. "
+        f"Expected start {expected_start.isoformat()} (third Friday) through "
+        f"{expected_end.isoformat()} (10 days, Sunday night), 30 rows. "
+        f"Found start {first_date.isoformat()} with {len(entries)} rows. "
+        "Check “Replace existing…” and click Regenerate Monark Service Log."
+    )
 
 
 def entry_key(entry: dict[str, Any]) -> str:

@@ -14,6 +14,7 @@ from monark_schedule import (
     get_monark_start_date,
     get_third_friday_of_july,
     mark_service_exported,
+    service_log_schedule_warning,
     suggest_current_service_code,
 )
 from service_log import generate_service_log
@@ -24,6 +25,7 @@ from title_renderer import (
     get_default_downloads_dir,
     resolve_export_dir,
 )
+from workflow_links import WHATSAPP_WEB_URL, YOUTUBE_PLAYLIST_URL
 
 
 class ThirdFridayScheduleTest(unittest.TestCase):
@@ -47,17 +49,56 @@ class ThirdFridayScheduleTest(unittest.TestCase):
     def test_generated_log_starts_on_third_friday(self) -> None:
         entries = generate_service_log(2026)
         self.assertEqual(entries[0]["date"], date(2026, 7, 17))
+        self.assertEqual(entries[0]["weekday"], "Friday")
         self.assertEqual(entries[0]["service_line"], "FRIDAY AM 7-17-26")
         self.assertEqual(len(entries), 30)
 
-    def test_schedule_has_ten_days_ending_second_sunday(self) -> None:
+    def test_2026_schedule_ten_days_friday_through_sunday(self) -> None:
         dates = get_monark_schedule_dates(2026)
         self.assertEqual(len(dates), 10)
         self.assertEqual(dates[0], date(2026, 7, 17))
+        self.assertEqual(dates[0].strftime("%A"), "Friday")
         self.assertEqual(dates[-1], date(2026, 7, 26))
+        self.assertEqual(dates[-1].strftime("%A"), "Sunday")
         self.assertEqual(dates[-1], dates[0] + timedelta(days=9))
-        self.assertEqual(dates[-1].weekday(), 6)
-        self.assertEqual(len(get_monark_service_entries(2026)), 30)
+
+        entries = get_monark_service_entries(2026)
+        self.assertEqual(len(entries), 30)
+        self.assertEqual(
+            [entry_key(e) for e in entries[:3]],
+            ["2026-07-17_AM", "2026-07-17_AFT", "2026-07-17_PM"],
+        )
+        self.assertEqual(
+            [entry_key(e) for e in entries[-3:]],
+            ["2026-07-26_AM", "2026-07-26_AFT", "2026-07-26_PM"],
+        )
+        self.assertEqual(entries[-1]["service_line"], "SUNDAY PM 7-26-26")
+
+        # Exactly 3 services per date, ordered AM / AFT / PM.
+        by_date: dict[date, list[str]] = {}
+        for entry in entries:
+            by_date.setdefault(entry["date"], []).append(entry["service_code"])
+        self.assertEqual(len(by_date), 10)
+        for codes in by_date.values():
+            self.assertEqual(codes, ["AM", "AFT", "PM"])
+
+    def test_explicit_third_friday_years(self) -> None:
+        self.assertEqual(get_third_friday_of_july(2024), date(2024, 7, 19))
+        self.assertEqual(get_third_friday_of_july(2025), date(2025, 7, 18))
+        self.assertEqual(get_third_friday_of_july(2026), date(2026, 7, 17))
+        self.assertEqual(get_third_friday_of_july(2027), date(2027, 7, 16))
+        self.assertEqual(get_third_friday_of_july(2028), date(2028, 7, 21))
+
+    def test_warning_for_last_friday_legacy_log(self) -> None:
+        legacy = generate_service_log(2026)
+        # Simulate an old last-Friday-of-July log.
+        legacy[0]["date"] = date(2026, 7, 31)
+        warning = service_log_schedule_warning(legacy, year=2026)
+        self.assertIsNotNone(warning)
+        assert warning is not None
+        self.assertIn("2026-07-17", warning)
+        self.assertIn("Regenerate", warning)
+        self.assertIsNone(service_log_schedule_warning(generate_service_log(2026), 2026))
 
 
 class ServiceSuggestionTest(unittest.TestCase):
@@ -134,6 +175,21 @@ class ExportDirectoryTest(unittest.TestCase):
         self.assertEqual(entries[1]["exported_file"], path)
         self.assertFalse(entries[0]["exported"])
         self.assertFalse(entries[2]["exported"])
+
+
+class WorkflowLinksTest(unittest.TestCase):
+    def test_whatsapp_and_youtube_urls(self) -> None:
+        self.assertEqual(WHATSAPP_WEB_URL, "https://web.whatsapp.com/")
+        self.assertEqual(
+            YOUTUBE_PLAYLIST_URL,
+            "https://studio.youtube.com/playlist/PLC0_dngm_51A/videos",
+        )
+
+    def test_app_imports_workflow_links(self) -> None:
+        import app as app_module
+
+        self.assertEqual(app_module.WHATSAPP_WEB_URL, WHATSAPP_WEB_URL)
+        self.assertEqual(app_module.YOUTUBE_PLAYLIST_URL, YOUTUBE_PLAYLIST_URL)
 
 
 class YouTubeTitleTest(unittest.TestCase):

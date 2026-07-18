@@ -24,10 +24,6 @@ FONTS_DIR = PROJECT_ROOT / "fonts"
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 EXPORTS_DIR = PROJECT_ROOT / "exports"
 PRESETS_DIR = PROJECT_ROOT / "presets"
-YOUTUBE_PLAYLIST_URL = (
-    "https://studio.youtube.com/playlist/PLC0_dngm_51A/videos"
-)
-WHATSAPP_WEB_URL = "https://web.whatsapp.com/"
 
 
 def get_default_downloads_dir() -> Path:

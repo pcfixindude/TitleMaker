@@ -101,8 +101,11 @@ Selected text is highlighted in the preview guides. Export stays clean (no guide
 Track every Monark service in an editable spreadsheet:
 
 1. Open **Service Log** and choose a year.
-2. Click **Generate Monark Service Log** (30 rows: 10 days × AM/AFT/PM).
-   The log starts on the **third Friday of July** and runs through the second Sunday (10 days).
+2. Click **Generate Monark Service Log** (or **Regenerate** if replacing an old log).
+   Monark meeting starts on the **third Friday of July** and runs **10 days through Sunday night**
+   (30 rows: AM / AFT / PM each day). Example for 2026: July 17 → July 26.
+   If an older saved log still shows last-Friday dates (e.g. 7-31-26), check **Replace existing…**
+   and regenerate so the dates rebuild correctly.
 3. Choose **Current Service**, then type the sermon title and minister/speaker.
 4. Use **Previous Service** / **Next Service** to move through every row (including blanks).
 5. **Jump to Current Service** / **Suggest Current Service** selects today’s row from local time and service start times:
