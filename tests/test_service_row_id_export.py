@@ -56,9 +56,9 @@ class ServiceRowIdSelectionTest(unittest.TestCase):
         self.assertTrue(am_id.endswith("_AM"))
         self.assertTrue(aft_id.endswith("_AFT"))
         self.assertTrue(pm_id.endswith("_PM"))
-        self.assertEqual(am_id, "2026-07-31_AM")
-        self.assertEqual(aft_id, "2026-07-31_AFT")
-        self.assertEqual(pm_id, "2026-07-31_PM")
+        self.assertEqual(am_id, "2026-07-17_AM")
+        self.assertEqual(aft_id, "2026-07-17_AFT")
+        self.assertEqual(pm_id, "2026-07-17_PM")
 
     def test_selecting_aft_stores_aft_row_id(self) -> None:
         import app as app_module
@@ -102,7 +102,7 @@ class MarkServiceExportedRowIdTest(unittest.TestCase):
             entries,
             aft_id,
             exported_file="exports/aft.png",
-            exported_at=datetime(2026, 7, 31, 14, 0),
+            exported_at=datetime(2026, 7, 17, 14, 0),
         )
         self.assertTrue(updated)
         self.assertFalse(am["exported"])
@@ -125,7 +125,7 @@ class MarkServiceExportedRowIdTest(unittest.TestCase):
         # Wrong/missing id must not fall back to AM.
         entries[1]["exported"] = False
         self.assertFalse(
-            mark_service_exported(entries, "2026-07-31_MISSING", exported_file="x.png")
+            mark_service_exported(entries, "2026-07-17_MISSING", exported_file="x.png")
         )
         self.assertFalse(entries[0]["exported"])
         self.assertFalse(entries[1]["exported"])
@@ -141,24 +141,24 @@ class MarkServiceExportedRowIdTest(unittest.TestCase):
 
     def test_get_service_entry_by_row_id_exact_match(self) -> None:
         entries = generate_service_log(2026)
-        aft = get_service_entry_by_row_id(entries, "2026-07-31_AFT")
+        aft = get_service_entry_by_row_id(entries, "2026-07-17_AFT")
         assert aft is not None
         self.assertEqual(aft["service_code"], "AFT")
-        self.assertEqual(aft["service_line"], "FRIDAY AFT 7-31-26")
-        self.assertIsNone(get_service_entry_by_row_id(entries, "2026-07-31_AMX"))
+        self.assertEqual(aft["service_line"], "FRIDAY AFT 7-17-26")
+        self.assertIsNone(get_service_entry_by_row_id(entries, "2026-07-17_AMX"))
 
 
 class JumpToCurrentServiceRowIdTest(unittest.TestCase):
     def test_afternoon_time_chooses_aft_not_am(self) -> None:
         entries = generate_service_log(2026)
         current = find_current_service_entry(
-            entries, datetime(2026, 7, 31, 13, 30)
+            entries, datetime(2026, 7, 17, 14, 30)
         )
         self.assertIsNotNone(current)
         assert current is not None
-        self.assertEqual(entry_key(current), "2026-07-31_AFT")
+        self.assertEqual(entry_key(current), "2026-07-17_AFT")
         self.assertEqual(current["service_code"], "AFT")
-        self.assertNotEqual(entry_key(current), "2026-07-31_AM")
+        self.assertNotEqual(entry_key(current), "2026-07-17_AM")
 
 
 if __name__ == "__main__":

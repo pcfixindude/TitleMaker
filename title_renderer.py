@@ -24,6 +24,27 @@ FONTS_DIR = PROJECT_ROOT / "fonts"
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 EXPORTS_DIR = PROJECT_ROOT / "exports"
 PRESETS_DIR = PROJECT_ROOT / "presets"
+YOUTUBE_PLAYLIST_URL = (
+    "https://studio.youtube.com/playlist/PLC0_dngm_51A/videos"
+)
+WHATSAPP_WEB_URL = "https://web.whatsapp.com/"
+
+
+def get_default_downloads_dir() -> Path:
+    """Prefer the user's Downloads folder; fall back to app exports/."""
+    downloads = Path.home() / "Downloads"
+    if downloads.is_dir():
+        return downloads
+    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    return EXPORTS_DIR
+
+
+def resolve_export_dir(preference: str = "Downloads folder") -> Path:
+    """Resolve export directory from a UI preference label."""
+    if preference == "App exports folder":
+        EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        return EXPORTS_DIR
+    return get_default_downloads_dir()
 
 BARLOW_BOLD = FONTS_DIR / "BarlowCondensed-Bold.ttf"
 BARLOW_BOLD_ITALIC = FONTS_DIR / "BarlowCondensed-BoldItalic.ttf"
@@ -164,6 +185,22 @@ def format_title(value: str) -> str:
 
 def format_speaker(value: str) -> str:
     return " ".join(value.strip().upper().split())
+
+
+def format_youtube_title(service_line: str, title: str, speaker: str) -> str:
+    """Full YouTube title: SERVICE LINE | SERMON TITLE | SPEAKER."""
+    line = " ".join(str(service_line or "").strip().upper().split())
+    sermon = format_title(title).replace("\n", " ").strip()
+    minister = format_speaker(speaker)
+    return " | ".join(part for part in (line, sermon, minister) if part)
+
+
+def format_short_youtube_title(day: str, title: str, speaker: str) -> str:
+    """Short YouTube title: WEEKDAY | SERMON TITLE | SPEAKER."""
+    weekday = " ".join(str(day or "").strip().upper().split())
+    sermon = format_title(title).replace("\n", " ").strip()
+    minister = format_speaker(speaker)
+    return " | ".join(part for part in (weekday, sermon, minister) if part)
 
 
 def export_filename(options: TitleImageOptions) -> str:

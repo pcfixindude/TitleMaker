@@ -10,12 +10,23 @@ from title_renderer import format_service_line, normalize_service_code, service_
 
 SERVICES = ["Morning", "Afternoon", "Evening"]
 
+# Service start times (local). Titles are usually created after the service starts.
+SERVICE_START_AM = time(10, 0)
+SERVICE_START_AFT = time(14, 0)
+SERVICE_START_PM = time(19, 30)
+
+
+def get_third_friday_of_july(year: int) -> date:
+    """Return the third Friday of July for the given year."""
+    current = date(year, 7, 1)
+    while current.weekday() != 4:  # Friday
+        current += timedelta(days=1)
+    return current + timedelta(days=14)
+
 
 def get_monark_start_date(year: int) -> date:
-    current = date(year, 7, 31)
-    while current.weekday() != 4:
-        current -= timedelta(days=1)
-    return current
+    """Monark meeting starts on the third Friday of July."""
+    return get_third_friday_of_july(year)
 
 
 def get_monark_schedule_dates(year: int) -> list[date]:
@@ -175,13 +186,27 @@ def service_option_label(entry: dict[str, Any]) -> str:
     return f"{line} — {suffix}"
 
 
+def suggest_current_service_code(now_datetime: datetime | None = None) -> str:
+    """
+    Suggest AM / AFT / PM from the most recent service start time.
+
+    AM 10:00, AFT 2:00, PM 7:30. Before 10:00 AM defaults to AM (upcoming Morning).
+    """
+    current = now_datetime or datetime.now()
+    clock = current.time() if isinstance(current, datetime) else current
+    if clock < SERVICE_START_AFT:
+        return "AM"
+    if clock < SERVICE_START_PM:
+        return "AFT"
+    return "PM"
+
+
 def find_current_service_entry(
     entries: list[dict[str, Any]],
     now: datetime | None = None,
 ) -> dict[str, Any] | None:
     current = now or datetime.now()
-    service = service_for_time(current.time())
-    code = normalize_service_code(service)
+    code = suggest_current_service_code(current)
 
     for entry in entries:
         entry_code = normalize_service_code(
@@ -193,11 +218,8 @@ def find_current_service_entry(
 
 
 def service_for_time(value: time) -> str:
-    if value < time(12, 0):
-        return "Morning"
-    if value < time(17, 0):
-        return "Afternoon"
-    return "Evening"
+    code = suggest_current_service_code(datetime.combine(date.today(), value))
+    return {"AM": "Morning", "AFT": "Afternoon", "PM": "Evening"}[code]
 
 
 CSV_FIELDNAMES = [

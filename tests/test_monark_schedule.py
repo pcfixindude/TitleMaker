@@ -17,13 +17,14 @@ from title_renderer import format_service_line
 
 
 class MonarkScheduleTest(unittest.TestCase):
-    def test_get_monark_start_date_returns_last_friday_in_july(self) -> None:
+    def test_get_monark_start_date_returns_third_friday_in_july(self) -> None:
         start_date = get_monark_start_date(2026)
 
-        self.assertEqual(start_date, date(2026, 7, 31))
+        self.assertEqual(start_date, date(2026, 7, 17))
         self.assertEqual(start_date.weekday(), 4)
         self.assertEqual(start_date.month, 7)
-        self.assertGreater(start_date.day + 7, 31)
+        # Third Friday is in the middle of July, not the last week only.
+        self.assertLessEqual(start_date.day, 21)
 
     def test_sample_year_first_day_is_friday_in_july(self) -> None:
         first_day = get_monark_schedule_dates(2027)[0]
@@ -54,11 +55,11 @@ class MonarkScheduleTest(unittest.TestCase):
     def test_service_entry_contains_expected_fields(self) -> None:
         entry = get_monark_service_entries(2026)[1]
 
-        self.assertEqual(entry["date"], date(2026, 7, 31))
+        self.assertEqual(entry["date"], date(2026, 7, 17))
         self.assertEqual(entry["weekday"], "Friday")
         self.assertEqual(entry["service"], "Afternoon")
         self.assertEqual(entry["service_code"], "AFT")
-        self.assertEqual(entry["service_line"], "FRIDAY AFT 7-31-26")
+        self.assertEqual(entry["service_line"], "FRIDAY AFT 7-17-26")
 
     def test_date_formatting_has_no_leading_zeroes(self) -> None:
         self.assertEqual(
@@ -80,19 +81,19 @@ class MonarkScheduleTest(unittest.TestCase):
         entries = get_monark_service_entries(2026)
 
         self.assertEqual(
-            find_current_service_entry(entries, datetime(2026, 7, 31, 9, 0))[
+            find_current_service_entry(entries, datetime(2026, 7, 17, 9, 30))[
                 "service_code"
             ],
             "AM",
         )
         self.assertEqual(
-            find_current_service_entry(entries, datetime(2026, 7, 31, 13, 0))[
+            find_current_service_entry(entries, datetime(2026, 7, 17, 14, 0))[
                 "service_code"
             ],
             "AFT",
         )
         self.assertEqual(
-            find_current_service_entry(entries, datetime(2026, 7, 31, 19, 0))[
+            find_current_service_entry(entries, datetime(2026, 7, 17, 19, 30))[
                 "service_code"
             ],
             "PM",
@@ -102,10 +103,10 @@ class MonarkScheduleTest(unittest.TestCase):
         entries = get_monark_service_entries(2026)
         selected_key = entry_key(entries[0])
 
-        mark_entry_exported(entries, selected_key, datetime(2026, 7, 31, 20, 15))
+        mark_entry_exported(entries, selected_key, datetime(2026, 7, 17, 20, 15))
 
         self.assertTrue(entries[0]["exported"])
-        self.assertEqual(entries[0]["exported_at"], "2026-07-31T20:15:00")
+        self.assertEqual(entries[0]["exported_at"], "2026-07-17T20:15:00")
 
     def test_batch_export_candidates_do_not_require_placeholders(self) -> None:
         entries = get_monark_service_entries(2026)

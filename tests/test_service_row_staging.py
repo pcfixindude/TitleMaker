@@ -48,7 +48,7 @@ class ServiceRowStagingTest(unittest.TestCase):
             self.assertEqual(fake_state["pending_title_input"], "")
             self.assertEqual(fake_state["pending_speaker_input"], "")
             self.assertEqual(fake_state["pending_service_row_id"], first_id)
-            self.assertEqual(fake_state["pending_date_input"], date(2026, 7, 31))
+            self.assertEqual(fake_state["pending_date_input"], date(2026, 7, 17))
 
     def test_apply_pending_loads_blank_row_into_widget_keys(self) -> None:
         import app as app_module
@@ -59,10 +59,10 @@ class ServiceRowStagingTest(unittest.TestCase):
                 "pending_title_input": "",
                 "pending_speaker_input": "",
                 "pending_notes_input": "keep notes pending",
-                "pending_date_input": date(2026, 7, 31),
+                "pending_date_input": date(2026, 7, 17),
                 "pending_service_input": "Morning",
-                "pending_current_service_select": "2026-07-31_AM",
-                "pending_service_row_id": "2026-07-31_AM",
+                "pending_current_service_select": "2026-07-17_AM",
+                "pending_service_row_id": "2026-07-17_AM",
                 "simple_title_input": "STALE",
                 "simple_speaker_input": "STALE",
             }
@@ -71,11 +71,11 @@ class ServiceRowStagingTest(unittest.TestCase):
             app_module._apply_pending_input_values_before_widgets()
             self.assertEqual(fake_state["simple_title_input"], "")
             self.assertEqual(fake_state["simple_speaker_input"], "")
-            self.assertEqual(fake_state["simple_date_input"], date(2026, 7, 31))
+            self.assertEqual(fake_state["simple_date_input"], date(2026, 7, 17))
             self.assertEqual(fake_state["simple_service_select"], "Morning")
-            self.assertEqual(fake_state["service_log_current_select"], "2026-07-31_AM")
-            self.assertEqual(fake_state["service_log_selected_row_id"], "2026-07-31_AM")
-            self.assertEqual(fake_state["selected_service_row_id"], "2026-07-31_AM")
+            self.assertEqual(fake_state["service_log_current_select"], "2026-07-17_AM")
+            self.assertEqual(fake_state["service_log_selected_row_id"], "2026-07-17_AM")
+            self.assertEqual(fake_state["selected_service_row_id"], "2026-07-17_AM")
             self.assertNotIn("needs_input_reload", fake_state)
             self.assertNotIn("pending_title_input", fake_state)
 

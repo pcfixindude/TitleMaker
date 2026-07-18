@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import platform
+import subprocess
 from dataclasses import replace
 from datetime import date, datetime
 from io import BytesIO
@@ -58,22 +60,28 @@ from title_renderer import (
     DEFAULT_SPEAKER_BOX,
     DEFAULT_TITLE_BOX,
     DEFAULT_TITLE_LINE_SPACING_PX,
-    EXPORTS_DIR,
     LAYOUT_DEFAULTS_VERSION,
     MAX_TITLE_FONT_SIZE,
     PROJECT_ROOT,
     TITLE_LINE_SPACING_PX_MAX,
     TITLE_LINE_SPACING_PX_MIN,
     TitleImageOptions,
+    WHATSAPP_WEB_URL,
+    YOUTUBE_PLAYLIST_URL,
     clamp_title_line_spacing,
     ensure_project_dirs,
     export_filename,
+    format_short_youtube_title,
+    format_youtube_title,
     list_template_backgrounds,
     normalize_selected_area,
     normalize_service_code,
     render_title_image,
+    resolve_export_dir,
     text_box_from_dict,
 )
+
+EXPORT_LOCATION_OPTIONS = ("Downloads folder", "App exports folder")
 
 
 SERVICES = ["Morning", "Afternoon", "Evening"]
@@ -281,15 +289,39 @@ def main() -> None:
         st.caption(f"Selected log row: {selected_id or '(none — manual mode)'}")
         st.caption(f"Service line: {service_line}")
 
+        youtube_title = format_youtube_title(service_line, sermon_title, speaker)
+        short_youtube_title = format_short_youtube_title(day, sermon_title, speaker)
+        st.text_input(
+            "YouTube Video Title",
+            value=youtube_title,
+            disabled=True,
+            help="SERVICE LINE | SERMON TITLE | SPEAKER — select and copy",
+        )
+        st.caption(f"Short YouTube title: {short_youtube_title}")
+
+        st.selectbox(
+            "Export location",
+            EXPORT_LOCATION_OPTIONS,
+            key="simple_export_location",
+            help="Default is your Downloads folder when it exists.",
+        )
+
         if st.button("Export PNG", type="primary", width="stretch"):
-            output_path = EXPORTS_DIR / export_filename(export_options)
+            export_dir = resolve_export_dir(
+                st.session_state.get("simple_export_location", "Downloads folder")
+            )
+            export_dir.mkdir(parents=True, exist_ok=True)
+            output_path = export_dir / export_filename(export_options)
             render_title_image(export_options).save(output_path, "PNG")
             st.session_state.simple_last_export = str(output_path)
             _mark_selected_service_exported(output_path)
-            st.success(f"Saved to {output_path}")
+            st.success(f"Saved to:\n{output_path}")
 
         if st.session_state.get("simple_last_export"):
             st.caption(f"Last export: {st.session_state.simple_last_export}")
+            _render_post_export_helpers(st.session_state.simple_last_export)
+
+        _render_youtube_tools()
 
         st.caption(
             "Fonts configured per section · white by default · "
@@ -389,6 +421,14 @@ def _render_current_service_controls(entries: list) -> None:
         key="service_log_jump",
         width="stretch",
         on_click=_jump_to_current_service,
+        help="Select today’s AM/AFT/PM from service start times (10:00 / 2:00 / 7:30).",
+    )
+    st.button(
+        "Suggest Current Service",
+        key="service_log_suggest",
+        width="stretch",
+        on_click=_jump_to_current_service,
+        help="Same as Jump — uses local time and Monark service start times.",
     )
 
 
@@ -423,13 +463,15 @@ def _jump_to_current_service() -> None:
     current = find_current_service_entry(entries)
     if not current:
         st.session_state.service_log_message = (
-            "Today is not in the current service log."
+            "Today is outside the generated Monark schedule."
         )
         return
     new_id = entry_key(current)
     _set_selected_service_row_id(new_id)
     _stage_service_row_reload(new_id)
-    st.session_state.service_log_message = f"Jumped to {current['service_line']}."
+    st.session_state.service_log_message = (
+        f"Suggested service: {current['service_line']} based on current time."
+    )
 
 
 def _commit_inputs_to_row(row_id_value: str | None) -> None:
@@ -534,6 +576,40 @@ def _sync_selected_service_from_inputs(title: str, speaker: str) -> None:
     st.session_state.service_log_entries = entries
     save_service_log(
         entries, year=int(st.session_state.get("service_log_year") or date.today().year)
+    )
+
+
+def _render_post_export_helpers(export_path_str: str) -> None:
+    st.subheader("Post to WhatsApp")
+    path = Path(export_path_str)
+    st.code(str(path), language=None)
+    st.caption(
+        "Open the Monark Audio/Video Booth WhatsApp group, then drag this image "
+        "from Downloads into the chat."
+    )
+    cols = st.columns(2)
+    with cols[0]:
+        if st.button("Reveal Image in Finder", key="reveal_export_finder", width="stretch"):
+            if path.is_file() and platform.system() == "Darwin":
+                try:
+                    subprocess.run(["open", "-R", str(path)], check=False)
+                    st.session_state.service_log_message = f"Revealed in Finder: {path}"
+                except Exception as exc:
+                    st.warning(f"Could not reveal in Finder: {exc}")
+            elif path.is_file():
+                st.info(f"Image saved at:\n{path}")
+            else:
+                st.warning("Exported image file was not found on disk.")
+    with cols[1]:
+        st.link_button("Open WhatsApp Web", WHATSAPP_WEB_URL, width="stretch")
+
+
+def _render_youtube_tools() -> None:
+    st.subheader("YouTube Tools")
+    st.link_button(
+        "Open YouTube Studio Playlist",
+        YOUTUBE_PLAYLIST_URL,
+        width="stretch",
     )
 
 
@@ -940,6 +1016,7 @@ def _ensure_simple_defaults() -> None:
     st.session_state.setdefault("simple_title_input", "")
     st.session_state.setdefault("simple_speaker_input", "")
     st.session_state.setdefault("simple_last_export", "")
+    st.session_state.setdefault("simple_export_location", "Downloads folder")
     st.session_state.setdefault("simple_selected_area", "title")
     st.session_state.setdefault("simple_preset_save_slot", 1)
     st.session_state.setdefault("simple_preset_name", "")

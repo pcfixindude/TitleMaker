@@ -27,26 +27,26 @@ class BoothModeTest(unittest.TestCase):
     def test_service_option_labels_include_service_line_and_status(self) -> None:
         entries = get_monark_service_entries(2026)
 
-        self.assertEqual(build_booth_service_label(entries[0]), "FRIDAY AM 7-31-26 — blank")
+        self.assertEqual(build_booth_service_label(entries[0]), "FRIDAY AM 7-17-26 — blank")
 
         entries[1]["title"] = "IS GOD REAL?"
         entries[1]["speaker"] = "BRO. MARTY CLEVENGER"
         self.assertEqual(
             booth_service_label(entries[1]),
-            "FRIDAY AFT 7-31-26 — IS GOD REAL? / BRO. MARTY CLEVENGER",
+            "FRIDAY AFT 7-17-26 — IS GOD REAL? / BRO. MARTY CLEVENGER",
         )
 
         entries[2]["exported"] = True
-        self.assertEqual(booth_service_label(entries[2]), "FRIDAY PM 7-31-26 — exported")
+        self.assertEqual(booth_service_label(entries[2]), "FRIDAY PM 7-17-26 — exported")
 
     def test_service_option_label_handles_title_only_and_speaker_only(self) -> None:
         entries = get_monark_service_entries(2026)
         entries[0]["title"] = "Title Only"
         entries[1]["speaker"] = "Speaker Only"
 
-        self.assertEqual(booth_service_label(entries[0]), "FRIDAY AM 7-31-26 — Title Only")
+        self.assertEqual(booth_service_label(entries[0]), "FRIDAY AM 7-17-26 — Title Only")
         self.assertEqual(
-            booth_service_label(entries[1]), "FRIDAY AFT 7-31-26 — Speaker Only"
+            booth_service_label(entries[1]), "FRIDAY AFT 7-17-26 — Speaker Only"
         )
 
     def test_service_option_label_truncates_long_details(self) -> None:
@@ -170,14 +170,14 @@ class BoothModeTest(unittest.TestCase):
         labels = [booth_service_label(entry) for entry in entries]
 
         self.assertEqual(len(labels), 5)
-        self.assertIn("FRIDAY AFT 7-31-26 — blank", labels)
-        self.assertIn("FRIDAY PM 7-31-26 — blank", labels)
+        self.assertIn("FRIDAY AFT 7-17-26 — blank", labels)
+        self.assertIn("FRIDAY PM 7-17-26 — blank", labels)
 
     def test_blank_rows_have_stable_unique_ids(self) -> None:
         entries = get_monark_service_entries(2026)[:3]
         keys = [entry_key(entry) for entry in entries]
 
-        self.assertEqual(keys, ["2026-07-31_AM", "2026-07-31_AFT", "2026-07-31_PM"])
+        self.assertEqual(keys, ["2026-07-17_AM", "2026-07-17_AFT", "2026-07-17_PM"])
         self.assertEqual(len(set(keys)), 3)
 
     def test_switching_previous_preserves_current_edits(self) -> None:
@@ -198,7 +198,7 @@ class BoothModeTest(unittest.TestCase):
 
     def test_jump_to_current_service_can_update_selected_index_safely(self) -> None:
         entries = get_monark_service_entries(2026)
-        current = find_current_service_entry(entries, datetime(2026, 7, 31, 17, 0))
+        current = find_current_service_entry(entries, datetime(2026, 7, 17, 19, 30))
         assert current is not None
         current_index = entries.index(current)
 
@@ -209,7 +209,7 @@ class BoothModeTest(unittest.TestCase):
 
     def test_jump_to_current_service_finds_blank_row(self) -> None:
         entries = get_monark_service_entries(2026)
-        current = find_current_service_entry(entries, datetime(2026, 7, 31, 13, 0))
+        current = find_current_service_entry(entries, datetime(2026, 7, 17, 14, 0))
 
         self.assertIsNotNone(current)
         assert current is not None
@@ -221,19 +221,19 @@ class BoothModeTest(unittest.TestCase):
         entries = get_monark_service_entries(2026)
         selected_key = entry_key(entries[0])
 
-        mark_booth_exported(entries, selected_key, datetime(2026, 7, 31, 9, 0))
+        mark_booth_exported(entries, selected_key, datetime(2026, 7, 17, 9, 0))
 
         self.assertTrue(entries[0]["exported"])
-        self.assertEqual(entries[0]["exported_at"], "2026-07-31T09:00:00")
+        self.assertEqual(entries[0]["exported_at"], "2026-07-17T09:00:00")
 
     def test_reexport_updates_exported_at(self) -> None:
         entries = get_monark_service_entries(2026)
         selected_key = entry_key(entries[0])
 
-        mark_booth_exported(entries, selected_key, datetime(2026, 7, 31, 9, 0))
-        mark_booth_exported(entries, selected_key, datetime(2026, 7, 31, 9, 30))
+        mark_booth_exported(entries, selected_key, datetime(2026, 7, 17, 9, 0))
+        mark_booth_exported(entries, selected_key, datetime(2026, 7, 17, 9, 30))
 
-        self.assertEqual(entries[0]["exported_at"], "2026-07-31T09:30:00")
+        self.assertEqual(entries[0]["exported_at"], "2026-07-17T09:30:00")
 
     def test_no_schedule_message_is_friendly(self) -> None:
         self.assertIn("Generate a Monark schedule first", NO_SCHEDULE_MESSAGE)
@@ -242,19 +242,19 @@ class BoothModeTest(unittest.TestCase):
         entries = get_monark_service_entries(2026)
 
         self.assertEqual(
-            find_current_service_entry(entries, datetime(2026, 7, 31, 9, 0))[
+            find_current_service_entry(entries, datetime(2026, 7, 17, 9, 0))[
                 "service_code"
             ],
             "AM",
         )
         self.assertEqual(
-            find_current_service_entry(entries, datetime(2026, 7, 31, 13, 0))[
+            find_current_service_entry(entries, datetime(2026, 7, 17, 14, 0))[
                 "service_code"
             ],
             "AFT",
         )
         self.assertEqual(
-            find_current_service_entry(entries, datetime(2026, 7, 31, 17, 0))[
+            find_current_service_entry(entries, datetime(2026, 7, 17, 19, 30))[
                 "service_code"
             ],
             "PM",

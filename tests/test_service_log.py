@@ -33,13 +33,13 @@ class ServiceLogScheduleTest(unittest.TestCase):
     def test_generated_log_shape(self) -> None:
         entries = generate_service_log(2026)
         self.assertEqual(len(entries), 30)
-        self.assertEqual(entries[0]["date"], date(2026, 7, 31))
+        self.assertEqual(entries[0]["date"], date(2026, 7, 17))
         self.assertEqual(entries[0]["weekday"], "Friday")
         codes = [entry["service_code"] for entry in entries[:3]]
         self.assertEqual(codes, ["AM", "AFT", "PM"])
         ids = [entry_key(entry) for entry in entries]
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertEqual(entries[0]["service_line"], "FRIDAY AM 7-31-26")
+        self.assertEqual(entries[0]["service_line"], "FRIDAY AM 7-17-26")
         self.assertTrue(all(entry["title"] == "" for entry in entries))
 
     def test_service_order_not_alphabetical(self) -> None:
@@ -80,12 +80,12 @@ class ServiceLogPersistenceTest(unittest.TestCase):
     def test_missing_fields_migrate(self) -> None:
         entry = normalize_entry(
             {
-                "date": "2026-07-31",
+                "date": "2026-07-17",
                 "service": "Morning",
                 "title": "Truth",
             }
         )
-        self.assertEqual(entry["row_id"], "2026-07-31_AM")
+        self.assertEqual(entry["row_id"], "2026-07-17_AM")
         self.assertEqual(entry["service_code"], "AM")
         self.assertEqual(entry["exported_file"], "")
         self.assertFalse(entry["exported"])
@@ -107,11 +107,11 @@ class ServiceLogCsvTest(unittest.TestCase):
     def test_import_derives_row_id(self) -> None:
         csv_text = (
             "date,service,title,speaker\n"
-            "2026-07-31,Morning,Hope,Marty\n"
+            "2026-07-17,Morning,Hope,Marty\n"
         )
         restored = import_service_log_csv(csv_text)
         self.assertEqual(len(restored), 1)
-        self.assertEqual(restored[0]["row_id"], "2026-07-31_AM")
+        self.assertEqual(restored[0]["row_id"], "2026-07-17_AM")
         self.assertEqual(restored[0]["title"], "Hope")
 
 
@@ -138,7 +138,7 @@ class ServiceLogSelectionTest(unittest.TestCase):
     def test_jump_finds_blank_current_row(self) -> None:
         entries = generate_service_log(2026)
         current = find_current_service_entry(
-            entries, datetime(2026, 7, 31, 13, 0)
+            entries, datetime(2026, 7, 17, 14, 0)
         )
         self.assertIsNotNone(current)
         assert current is not None
@@ -161,11 +161,11 @@ class ServiceLogExportTest(unittest.TestCase):
         mark_entry_exported(
             entries,
             key,
-            exported_at=datetime(2026, 7, 31, 20, 15),
+            exported_at=datetime(2026, 7, 17, 20, 15),
             exported_file="exports/demo.png",
         )
         self.assertTrue(entries[0]["exported"])
-        self.assertEqual(entries[0]["exported_at"], "2026-07-31T20:15:00")
+        self.assertEqual(entries[0]["exported_at"], "2026-07-17T20:15:00")
         self.assertEqual(entries[0]["exported_file"], "exports/demo.png")
 
     def test_display_edit_round_trip(self) -> None:

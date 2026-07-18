@@ -83,7 +83,7 @@ class PersistenceTest(unittest.TestCase):
             mark_entry_exported(
                 entries,
                 entry_key(entries[0]),
-                datetime(2026, 7, 31, 19, 30),
+                datetime(2026, 7, 17, 19, 30),
             )
 
             save_service_log(entries, 2026, path)
@@ -92,7 +92,7 @@ class PersistenceTest(unittest.TestCase):
             self.assertIsNotNone(loaded)
             assert loaded is not None
             self.assertTrue(loaded["rows"][0]["exported"])
-            self.assertEqual(loaded["rows"][0]["exported_at"], "2026-07-31T19:30:00")
+            self.assertEqual(loaded["rows"][0]["exported_at"], "2026-07-17T19:30:00")
 
 
 if __name__ == "__main__":

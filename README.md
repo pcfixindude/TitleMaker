@@ -102,10 +102,15 @@ Track every Monark service in an editable spreadsheet:
 
 1. Open **Service Log** and choose a year.
 2. Click **Generate Monark Service Log** (30 rows: 10 days × AM/AFT/PM).
+   The log starts on the **third Friday of July** and runs through the second Sunday (10 days).
 3. Choose **Current Service**, then type the sermon title and minister/speaker.
 4. Use **Previous Service** / **Next Service** to move through every row (including blanks).
-5. **Jump to Current Service** selects today’s AM/AFT/PM row when the date is in the meeting.
-6. **Export PNG** marks the selected row as exported and stores the file path/time.
+5. **Jump to Current Service** / **Suggest Current Service** selects today’s row from local time and service start times:
+   - AM 10:00
+   - AFT 2:00
+   - PM 7:30  
+   (Before 10:00 AM, Morning is suggested.)
+6. **Export PNG** marks the selected `row_id` as exported and stores the full file path/time.
 7. Edit or correct rows in the Service Log table.
 8. **Export Service Log CSV** / **Import Service Log CSV** for backups or external edits.
 
@@ -114,8 +119,26 @@ The service log is saved separately from style presets in `data/service_log.json
 ## Export
 
 - Size: 1920×1080 PNG
-- Folder: `exports/`
-- Name example: `2026-07-31_FRIDAY_AM_THE_TRUTH_THE_WHOLE_TRUTH.png`
+- Default folder: your **Downloads** folder (falls back to `exports/` if Downloads is missing)
+- Optional setting: **Export location** → Downloads folder or App exports folder
+- Name example: `2026-07-17_FRIDAY_AM_THE_TRUTH_THE_WHOLE_TRUTH.png`
+
+## WhatsApp posting
+
+TitleMaker does not post into WhatsApp automatically. After export:
+
+1. Confirm the saved image path (usually in Downloads).
+2. Use **Reveal Image in Finder** (macOS) or open Downloads manually.
+3. Click **Open WhatsApp Web** and open the **Monark Audio/Video Booth** group.
+4. Drag the exported image from Downloads into the chat.
+
+## YouTube tools
+
+- **Open YouTube Studio Playlist** opens the Monark playlist in YouTube Studio.
+- **YouTube Video Title** is generated live as:  
+  `SERVICE LINE | SERMON TITLE | SPEAKER`  
+  Example: `FRIDAY AFT 7-18-26 | IS GOD REAL? | BRO. MARTY CLEVENGER`  
+  A short weekday-only variant is shown underneath for convenience.
 
 ## Tests
 
