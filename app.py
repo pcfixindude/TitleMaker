@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import getpass
 import json
 import platform
 import subprocess
@@ -34,6 +35,13 @@ from monark_schedule import (
     service_option_label,
     update_entry_text,
 )
+from google_sheets_log import (
+    STORAGE_GOOGLE,
+    STORAGE_LOCAL,
+    STORAGE_OPTIONS,
+    default_storage_mode,
+    is_google_sheets_configured,
+)
 from service_log import (
     apply_display_edits,
     archive_service_log,
@@ -41,7 +49,8 @@ from service_log import (
     export_service_log_csv,
     generate_service_log,
     import_service_log_csv,
-    load_service_log,
+    load_service_log_for_storage,
+    persist_service_log_entries,
     save_service_log,
 )
 from simple_presets import (
@@ -475,6 +484,45 @@ def _jump_to_current_service() -> None:
     )
 
 
+def _default_booth_operator() -> str:
+    try:
+        return getpass.getuser() or ""
+    except Exception:
+        return ""
+
+
+def _booth_operator_name() -> str:
+    return str(st.session_state.get("booth_operator_name") or "").strip()
+
+
+def _storage_mode() -> str:
+    mode = st.session_state.get("service_log_storage_mode") or STORAGE_LOCAL
+    if mode == STORAGE_GOOGLE and not is_google_sheets_configured():
+        return STORAGE_LOCAL
+    return str(mode)
+
+
+def _persist_log(
+    entries: list,
+    *,
+    changed_row_id: str | None = None,
+    full_replace: bool = False,
+) -> None:
+    """Persist to Local JSON and/or Google Sheets; keep session state in sync."""
+    year = int(st.session_state.get("service_log_year") or date.today().year)
+    saved, warning = persist_service_log_entries(
+        entries,
+        year=year,
+        storage_mode=_storage_mode(),
+        updated_by=_booth_operator_name(),
+        changed_row_id=None if full_replace else changed_row_id,
+        local_backup=True,
+    )
+    st.session_state.service_log_entries = saved
+    if warning:
+        st.session_state.service_log_warning = warning
+
+
 def _commit_inputs_to_row(row_id_value: str | None) -> None:
     if not row_id_value:
         return
@@ -489,10 +537,7 @@ def _commit_inputs_to_row(row_id_value: str | None) -> None:
         str(st.session_state.get("simple_title_input") or ""),
         str(st.session_state.get("simple_speaker_input") or ""),
     )
-    st.session_state.service_log_entries = entries
-    save_service_log(
-        entries, year=int(st.session_state.get("service_log_year") or date.today().year)
-    )
+    _persist_log(entries, changed_row_id=row_id_value)
 
 
 def _stage_service_row_reload(row_id_value: str | None) -> None:
@@ -574,10 +619,7 @@ def _sync_selected_service_from_inputs(title: str, speaker: str) -> None:
     if entry.get("title") == title and entry.get("speaker") == speaker:
         return
     update_entry_text(entries, row_id_value, title, speaker)
-    st.session_state.service_log_entries = entries
-    save_service_log(
-        entries, year=int(st.session_state.get("service_log_year") or date.today().year)
-    )
+    _persist_log(entries, changed_row_id=row_id_value)
 
 
 def _render_post_export_helpers(export_path_str: str) -> None:
@@ -641,9 +683,62 @@ def _mark_selected_service_exported(output_path: Path) -> None:
             "no fallback row was updated."
         )
         return
+    _persist_log(entries, changed_row_id=row_id_value)
+
+
+def _reload_from_google_sheets() -> None:
+    entries, warning = load_service_log_for_storage(STORAGE_GOOGLE)
     st.session_state.service_log_entries = entries
-    save_service_log(
-        entries, year=int(st.session_state.get("service_log_year") or date.today().year)
+    if warning:
+        st.session_state.service_log_warning = warning
+    else:
+        st.session_state.service_log_message = (
+            f"Reloaded {len(entries)} rows from Google Sheets."
+        )
+    if entries:
+        selected = _get_selected_service_row_id(prefer_widget=False) or entry_key(
+            entries[0]
+        )
+        if get_service_entry_by_row_id(entries, selected) is None:
+            selected = entry_key(entries[0])
+        _set_selected_service_row_id(selected)
+        _stage_service_row_reload(selected)
+
+
+def _save_current_log_to_google_sheets() -> None:
+    entries = list(st.session_state.get("service_log_entries") or [])
+    if not entries:
+        st.session_state.service_log_message = "No service log rows to save."
+        return
+    if not is_google_sheets_configured():
+        st.session_state.service_log_warning = (
+            "Google Sheets is not configured in Streamlit secrets."
+        )
+        return
+    saved, warning = persist_service_log_entries(
+        entries,
+        year=int(st.session_state.get("service_log_year") or date.today().year),
+        storage_mode=STORAGE_GOOGLE,
+        updated_by=_booth_operator_name(),
+        changed_row_id=None,
+        local_backup=True,
+    )
+    st.session_state.service_log_entries = saved
+    if warning:
+        st.session_state.service_log_warning = warning
+    else:
+        st.session_state.service_log_message = (
+            f"Saved {len(saved)} rows to Google Sheets "
+            f"(updated_by={_booth_operator_name() or 'blank'})."
+        )
+
+
+def _save_local_backup() -> None:
+    entries = list(st.session_state.get("service_log_entries") or [])
+    year = int(st.session_state.get("service_log_year") or date.today().year)
+    save_service_log(entries, year=year)
+    st.session_state.service_log_message = (
+        f"Saved local JSON backup ({len(entries)} rows)."
     )
 
 
@@ -654,6 +749,53 @@ def _render_service_log_section() -> None:
             "Monark meeting starts on the third Friday of July and runs "
             "10 days through Sunday night (30 services: AM / AFT / PM each day)."
         )
+        st.text_input(
+            "Booth operator name",
+            key="booth_operator_name",
+            help="Recorded as updated_by when saving to Google Sheets.",
+            placeholder="Who is running the booth?",
+        )
+        configured = is_google_sheets_configured()
+        st.selectbox(
+            "Service Log Storage",
+            STORAGE_OPTIONS,
+            key="service_log_storage_mode",
+            help=(
+                "Google Sheets uses one shared service account for all devices. "
+                "Users do not need to log into Google."
+            ),
+        )
+        if st.session_state.get("service_log_storage_mode") == STORAGE_GOOGLE:
+            if configured:
+                st.caption(
+                    "Google Sheets mode: all booth devices share one Sheet via "
+                    "the deployed service account."
+                )
+            else:
+                st.warning(
+                    "Google Sheets storage is selected, but secrets are missing. "
+                    "Falling back to Local JSON until gcp_service_account and "
+                    "google_sheets.sheet_id are configured."
+                )
+        sync_cols = st.columns(3)
+        sync_cols[0].button(
+            "Reload from Google Sheets",
+            width="stretch",
+            on_click=_reload_from_google_sheets,
+            disabled=not configured,
+        )
+        sync_cols[1].button(
+            "Save Current Log to Google Sheets",
+            width="stretch",
+            on_click=_save_current_log_to_google_sheets,
+            disabled=not configured,
+        )
+        sync_cols[2].button(
+            "Save Local Backup",
+            width="stretch",
+            on_click=_save_local_backup,
+        )
+
         year = st.number_input(
             "Service log year",
             min_value=1900,
@@ -681,7 +823,8 @@ def _render_service_log_section() -> None:
                     key="service_log_confirm_replace",
                     help=(
                         "Required before regenerating. The current log is archived "
-                        "first, then replaced with the third-Friday 10-day schedule."
+                        "locally first. In Google Sheets mode this also replaces "
+                        "all Sheet rows after confirmation."
                     ),
                 )
             st.button(
@@ -794,10 +937,20 @@ def _render_service_log_section() -> None:
             for entry in updated
         ]
         if after != before:
-            st.session_state.service_log_entries = updated
-            save_service_log(updated, year=int(year))
+            # Persist each changed row by row_id when possible.
+            changed_ids = [
+                before_row[0]
+                for before_row, after_row in zip(before, after)
+                if before_row != after_row
+            ]
+            if len(changed_ids) == 1:
+                _persist_log(updated, changed_row_id=changed_ids[0])
+            else:
+                _persist_log(updated, full_replace=True)
             selected = _get_selected_service_row_id()
-            selected_entry = get_service_entry_by_row_id(updated, selected)
+            selected_entry = get_service_entry_by_row_id(
+                st.session_state.service_log_entries, selected
+            )
             if selected_entry is not None:
                 _stage_service_row_reload(selected)
                 st.rerun()
@@ -825,11 +978,7 @@ def _render_service_log_csv_controls(entries: list) -> None:
         try:
             text = uploaded.getvalue().decode("utf-8-sig")
             imported = import_service_log_csv(text)
-            st.session_state.service_log_entries = imported
-            save_service_log(
-                imported,
-                year=int(st.session_state.get("service_log_year") or date.today().year),
-            )
+            _persist_log(imported, full_replace=True)
             if imported:
                 first_id = entry_key(imported[0])
                 _set_selected_service_row_id(first_id)
@@ -862,19 +1011,19 @@ def _generate_service_log(year: int) -> None:
         f"{start.isoformat()} (Friday) through {end.isoformat()} (Sunday), "
         "10 days / 30 services."
     )
+    archive_note = ""
     if existing:
         archive_path = archive_service_log(existing, year=year)
         if archive_path:
-            st.session_state.service_log_message = (
-                f"Previous log archived to {archive_path.name}. {summary}"
-            )
-        else:
-            st.session_state.service_log_message = summary
-    else:
-        st.session_state.service_log_message = summary
+            archive_note = f"Previous log archived to {archive_path.name}. "
+    if _storage_mode() == STORAGE_GOOGLE:
+        summary = (
+            f"{summary} Wrote all rows to the shared Google Sheet "
+            f"(updated_by={_booth_operator_name() or 'blank'})."
+        )
+    st.session_state.service_log_message = f"{archive_note}{summary}"
     generated = generate_service_log(year)
-    st.session_state.service_log_entries = generated
-    save_service_log(generated, year=year)
+    _persist_log(generated, full_replace=True)
     if generated:
         first_id = entry_key(generated[0])
         _set_selected_service_row_id(first_id)
@@ -1062,6 +1211,10 @@ def _ensure_simple_defaults() -> None:
     st.session_state.setdefault("selected_service_row_id", None)
     st.session_state.setdefault("service_log_selected_row_id", None)
     st.session_state.setdefault("service_log_confirm_replace", False)
+    st.session_state.setdefault("booth_operator_name", _default_booth_operator())
+    st.session_state.setdefault(
+        "service_log_storage_mode", default_storage_mode()
+    )
     # Migrate legacy session key once.
     if (
         st.session_state.get("selected_service_row_id") is None
@@ -1072,7 +1225,8 @@ def _ensure_simple_defaults() -> None:
         )
 
     if "service_log_entries" not in st.session_state:
-        loaded_log, log_warning = load_service_log()
+        mode = st.session_state.get("service_log_storage_mode") or default_storage_mode()
+        loaded_log, log_warning = load_service_log_for_storage(str(mode))
         st.session_state.service_log_entries = loaded_log
         if log_warning:
             st.session_state.service_log_warning = log_warning

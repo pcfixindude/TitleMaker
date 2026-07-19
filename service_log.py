@@ -76,6 +76,8 @@ def normalize_entry(raw: dict[str, Any] | None) -> dict[str, Any]:
         "exported_at": str(data.get("exported_at") or ""),
         "exported_file": str(data.get("exported_file") or ""),
         "include": _as_bool(data.get("include")),
+        "updated_at": str(data.get("updated_at") or ""),
+        "updated_by": str(data.get("updated_by") or ""),
     }
 
 
@@ -128,6 +130,105 @@ def save_service_log(
         "entries": [_entry_to_json(entry) for entry in normalize_entries(entries)],
     }
     atomic_write_json(target, payload)
+
+
+def load_service_log_for_storage(
+    storage_mode: str,
+    *,
+    secrets: Any | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Load from Google Sheets or Local JSON based on storage mode."""
+    from google_sheets_log import (
+        STORAGE_GOOGLE,
+        is_google_sheets_configured,
+        load_service_log_from_google_sheet,
+    )
+
+    if storage_mode == STORAGE_GOOGLE:
+        if not is_google_sheets_configured(secrets):
+            entries, warning = load_service_log()
+            msg = (
+                "Google Sheets is selected but not configured; "
+                "loaded Local JSON instead."
+            )
+            if warning:
+                msg = f"{msg} {warning}"
+            return entries, msg
+        entries, warning = load_service_log_from_google_sheet(secrets)
+        if warning:
+            local_entries, local_warning = load_service_log()
+            parts = [warning, "Using Local JSON backup if available."]
+            if local_warning:
+                parts.append(local_warning)
+            return local_entries, " ".join(parts)
+        return entries, None
+    return load_service_log()
+
+
+def persist_service_log_entries(
+    entries: list[dict[str, Any]],
+    *,
+    year: int | None = None,
+    storage_mode: str = "Local JSON",
+    updated_by: str = "",
+    changed_row_id: str | None = None,
+    secrets: Any | None = None,
+    local_backup: bool = True,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """
+    Persist service log to the active storage backend.
+
+    Returns (entries, warning). Warning is set on fallback/error.
+    When Google Sheets mode is active, updates by exact row_id (or full replace).
+    Writes a Local JSON backup when local_backup is True (default).
+    """
+    from google_sheets_log import (
+        STORAGE_GOOGLE,
+        is_google_sheets_configured,
+        save_full_service_log_to_google_sheet,
+        upsert_service_log_row,
+    )
+    from monark_schedule import get_service_entry_by_row_id
+
+    normalized = normalize_entries(entries)
+    warning: str | None = None
+
+    if storage_mode == STORAGE_GOOGLE:
+        if not is_google_sheets_configured(secrets):
+            warning = (
+                "Google Sheets is selected but credentials/sheet_id are missing; "
+                "saved Local JSON only."
+            )
+        else:
+            try:
+                if changed_row_id:
+                    entry = get_service_entry_by_row_id(normalized, changed_row_id)
+                    if entry is None:
+                        warning = (
+                            f"No row_id `{changed_row_id}` to upsert; "
+                            "Google Sheet was not changed."
+                        )
+                    else:
+                        saved = upsert_service_log_row(
+                            entry, updated_by=updated_by, secrets=secrets
+                        )
+                        for index, current in enumerate(normalized):
+                            if current.get("row_id") == saved.get("row_id"):
+                                normalized[index] = saved
+                                break
+                else:
+                    normalized = save_full_service_log_to_google_sheet(
+                        normalized, updated_by=updated_by, secrets=secrets
+                    )
+            except Exception as exc:
+                warning = (
+                    f"Google Sheets save failed ({exc}). "
+                    "Kept session data and saved Local JSON backup."
+                )
+
+    if local_backup or storage_mode != STORAGE_GOOGLE or warning:
+        save_service_log(normalized, year=year)
+    return normalized, warning
 
 
 def archive_service_log(

@@ -119,6 +119,66 @@ Track every Monark service in an editable spreadsheet:
 
 The service log is saved separately from style presets in `data/service_log.json`.
 
+## Shared Service Log Across Devices
+
+Different people can open the **same deployed TitleMaker app** from different devices and Google accounts. They all share one Monark service log.
+
+### How sharing works
+
+- Users do **not** log into their own Google accounts in the app.
+- The deployed app uses **one Google Cloud service account** stored in Streamlit secrets.
+- That service account edits **one shared Google Sheet**.
+- Every booth operator reads/writes through that same service account.
+- Edits use stable `row_id` values (`2026-07-17_AFT`), so Friday AFT never overwrites Friday AM.
+- `updated_by` comes from the **Booth operator name** field (not Google login).
+- `updated_at` is stamped on each save.
+- Conflict rule: **last save wins** if two people edit the same row.
+
+### Google Sheet setup
+
+1. Create a Google Sheet (for example **Monark TitleMaker Service Log**).
+2. Create a Google Cloud service account and download its JSON key.
+3. Copy the service account email (like `titlemaker-service@PROJECT.iam.gserviceaccount.com`).
+4. Share the Google Sheet with that email as **Editor**.
+5. Put the service account JSON fields under `[gcp_service_account]` in Streamlit secrets.
+6. Put the Sheet ID and worksheet name under `[google_sheets]`.
+
+Example secrets shape (never commit real keys):
+
+```toml
+[gcp_service_account]
+type = "service_account"
+project_id = "your-project"
+private_key_id = "..."
+private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+client_email = "titlemaker-service@PROJECT.iam.gserviceaccount.com"
+client_id = "..."
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "..."
+
+[google_sheets]
+sheet_id = "YOUR_GOOGLE_SHEET_ID"
+worksheet_name = "Service Log"
+```
+
+`.streamlit/secrets.toml` is gitignored and must not be committed to GitHub.
+
+### App storage mode
+
+In **Service Log**:
+
+- **Service Log Storage**: `Local JSON` or `Google Sheets`
+- Default: Google Sheets when secrets are configured; otherwise Local JSON
+- If Google Sheets is selected but secrets are missing, the app warns and falls back to Local JSON
+- **Reload from Google Sheets** / **Save Current Log to Google Sheets** / **Save Local Backup**
+- Generating/regenerating the Monark log in Google Sheets mode replaces Sheet rows after confirm (local archive first)
+
+Sheet columns:
+
+`row_id, date, weekday, service, service_line, sermon_title, speaker, notes, exported, exported_at, exported_file, include, updated_at, updated_by`
+
 ## Export
 
 - Size: 1920×1080 PNG
